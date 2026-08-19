@@ -8,6 +8,8 @@ probe scans your edge — and you're scored on Well-Architected-style pillars.
 
 It's a design tool with consequences: build it wrong and you *watch* it fall over.
 
+**▶ Play it: <https://d7i4bs34j2edg.cloudfront.net>**
+
 ```
 Users ──▶ CloudFront ──▶ S3          ★★★  $15/mo
 Users ──▶ S3                         ★☆☆  saturated at 2,000 rps + public bucket flagged
@@ -98,18 +100,27 @@ style you want to learn.
 The game is a static SPA, so it deploys as… the Level 1 architecture from the game itself:
 a private S3 bucket behind a CloudFront distribution with Origin Access Control.
 
+`scripts/deploy.sh` builds, uploads, and invalidates in one shot:
+
 ```bash
-npm run build
-aws s3 sync dist/ s3://YOUR_BUCKET --delete --profile YOUR_PROFILE
-aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*" --profile YOUR_PROFILE
+./scripts/deploy.sh
 ```
 
-`scripts/deploy.sh` wraps all three steps — set `BUCKET`, `DISTRIBUTION_ID`, and `AWS_PROFILE`
-at the top (or pass them as environment variables) and run it.
+Point it at your own account by overriding the defaults:
 
-Recommended distribution settings: default root object `index.html`, `403`/`404` custom error
-responses rewriting to `/index.html` with a `200`, Redirect HTTP to HTTPS, and long cache
-lifetimes on `/assets/*` (Vite content-hashes those filenames) with a short one on `index.html`.
+```bash
+BUCKET=my-bucket DISTRIBUTION_ID=E123ABC AWS_PROFILE=my-profile ./scripts/deploy.sh
+```
+
+It splits the upload deliberately: `/assets/*` is content-hashed by Vite, so it ships with
+`max-age=31536000, immutable`, while `index.html` ships `no-cache` — the mutable pointer to
+the immutable assets. Then it invalidates `/*`.
+
+The distribution behind it: default root object `index.html`, `403`/`404` custom error
+responses rewriting to `/index.html` with a `200` (so client-side routes survive a refresh),
+Redirect HTTP to HTTPS, HTTP/2 + HTTP/3, compression on, and the managed **CachingOptimized**
+policy. The bucket has all public access blocked; only the distribution can read it, via an
+Origin Access Control condition on the bucket policy.
 
 ---
 
