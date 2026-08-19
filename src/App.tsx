@@ -23,6 +23,7 @@ import { ResultsModal } from './components/ResultsModal'
 import { MenuScreen } from './components/MenuScreen'
 import { MissionBriefing } from './components/MissionBriefing'
 import { ScenarioSelect } from './components/ScenarioSelect'
+import { ScenarioEditor } from './components/ScenarioEditor'
 import { TutorialCoach } from './components/TutorialCoach'
 import { CATEGORY_COLORS, SERVICES } from './game/services'
 
@@ -163,6 +164,7 @@ export default function App() {
 
   if (screen === 'menu') return <MenuScreen />
   if (screen === 'select') return <ScenarioSelect />
+  if (screen === 'editor') return <ScenarioEditor />
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">

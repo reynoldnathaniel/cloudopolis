@@ -1,4 +1,4 @@
-export type TrackId = 'foundations' | 'genai' | 'event-driven' | 'streaming'
+export type TrackId = 'foundations' | 'genai' | 'event-driven' | 'streaming' | 'custom'
 
 export interface Track {
   id: TrackId
@@ -31,6 +31,12 @@ export const TRACKS: Track[] = [
     name: 'Streaming',
     emoji: '🌊',
     description: 'High-volume ingest and real-time AI scoring on the stream.',
+  },
+  {
+    id: 'custom',
+    name: 'My Scenarios',
+    emoji: '🛠️',
+    description: 'Author your own missions — for workshops, your team, or torture tests.',
   },
 ]
 
@@ -268,14 +274,32 @@ export const SCENARIOS: Scenario[] = [
   },
 ]
 
+// ---- custom scenarios (player-authored, registered at startup and on save) ----
+// The registry keeps this module pure data: customScenarios.ts owns persistence
+// and validation, and pushes the current list in here so every lookup below —
+// and therefore every component and the engine — sees custom scenarios as
+// ordinary rows.
+
+let CUSTOM: Scenario[] = []
+
+export const registerCustomScenarios = (list: Scenario[]): void => {
+  CUSTOM = list
+}
+
+const allScenarios = (): Scenario[] => (CUSTOM.length ? [...SCENARIOS, ...CUSTOM] : SCENARIOS)
+
 export const getScenario = (id: string): Scenario =>
-  SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0]
+  allScenarios().find((s) => s.id === id) ?? SCENARIOS[0]
 
 export const scenariosInTrack = (track: TrackId): Scenario[] =>
-  SCENARIOS.filter((s) => s.track === track).sort((a, b) => a.order - b.order)
+  allScenarios()
+    .filter((s) => s.track === track)
+    .sort((a, b) => a.order - b.order)
 
 /** The next scenario within the same track, or null if this one is the last. */
 export const nextScenario = (id: string): Scenario | null => {
   const current = getScenario(id)
-  return SCENARIOS.find((s) => s.track === current.track && s.order === current.order + 1) ?? null
+  return (
+    allScenarios().find((s) => s.track === current.track && s.order === current.order + 1) ?? null
+  )
 }

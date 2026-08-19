@@ -24,6 +24,9 @@ import {
 } from './game/engine'
 import { SERVICES } from './game/services'
 import { getScenario, type Scenario } from './game/scenarios'
+// Importing this module also loads + registers saved custom scenarios, so it
+// must stay above the saved-game validation below (imports run before body).
+import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
 import { TUTORIAL_STEPS } from './game/tutorial'
 
 const TUTORIAL_STEP_COUNT = TUTORIAL_STEPS.length
@@ -59,7 +62,7 @@ interface PhaseAgg {
   total: number
 }
 
-export type Screen = 'menu' | 'select' | 'game'
+export type Screen = 'menu' | 'select' | 'game' | 'editor'
 
 interface GameStore {
   screen: Screen
@@ -89,6 +92,10 @@ interface GameStore {
   briefingOpen: boolean
   /** Scenario ids whose briefing has been seen (persisted; auto-open is first-time-only) */
   briefingSeen: string[]
+  /** Player-authored scenarios (persisted separately under simcloud-custom-v1) */
+  customScenarios: Scenario[]
+  /** Custom scenario being edited, or null when the editor creates a new one */
+  editingScenarioId: string | null
 
   scenario: () => Scenario
   startGame: (withTutorial: boolean) => void
@@ -97,6 +104,13 @@ interface GameStore {
   playScenario: (id: string) => void
   openBriefing: () => void
   closeBriefing: () => void
+  /** Open the scenario editor — pass a custom scenario id to edit, or null to create */
+  openEditor: (id: string | null) => void
+  closeEditor: () => void
+  /** Upsert an authored scenario; play=true jumps straight into it.
+   *  markSeen skips the first-time briefing (authors wrote it; importers didn't). */
+  saveCustomScenario: (scenario: Scenario, play: boolean, markSeen: boolean) => void
+  deleteCustomScenario: (id: string) => void
   returnToMenu: () => void
   tutorialNext: () => void
   tutorialSkip: () => void
@@ -233,6 +247,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   tutorialDone: SAVED.tutorialDone === true,
   briefingOpen: false,
   briefingSeen: Array.isArray(SAVED.briefingSeen) ? SAVED.briefingSeen : [],
+  customScenarios: initialCustomScenarios,
+  editingScenarioId: null,
 
   scenario: () => getScenario(get().scenarioId),
 
@@ -265,6 +281,45 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       briefingOpen: false,
       briefingSeen: briefingSeen.includes(scenarioId) ? briefingSeen : [...briefingSeen, scenarioId],
     })
+  },
+
+  openEditor: (id) => set({ screen: 'editor', editingScenarioId: id }),
+
+  closeEditor: () => set({ screen: 'select', editingScenarioId: null }),
+
+  saveCustomScenario: (scenario, play, markSeen) => {
+    const list = get().customScenarios
+    const exists = list.some((s) => s.id === scenario.id)
+    // New scenarios go to the end of the track; edits keep their slot.
+    const order = exists ? scenario.order : list.reduce((m, s) => Math.max(m, s.order), 0) + 1
+    const stamped = { ...scenario, order }
+    const next = exists ? list.map((s) => (s.id === stamped.id ? stamped : s)) : [...list, stamped]
+    setCustomScenarios(next)
+    const { briefingSeen } = get()
+    set({
+      customScenarios: next,
+      editingScenarioId: null,
+      // Authors wrote the briefing — don't auto-open it on them. Imported
+      // scenarios stay unseen so the recipient gets the first-time open.
+      briefingSeen:
+        markSeen && !briefingSeen.includes(stamped.id) ? [...briefingSeen, stamped.id] : briefingSeen,
+    })
+    // Rebuild the canvas if the edited scenario is the one on the board
+    // (its VPC boxes or bans may have changed under the existing graph).
+    if (play || get().scenarioId === stamped.id) get().selectScenario(stamped.id)
+    set({ screen: play ? 'game' : 'select' })
+  },
+
+  deleteCustomScenario: (id) => {
+    const next = get().customScenarios.filter((s) => s.id !== id)
+    setCustomScenarios(next)
+    const { [id]: _gone, ...bestStars } = get().bestStars
+    set({
+      customScenarios: next,
+      bestStars,
+      briefingSeen: get().briefingSeen.filter((b) => b !== id),
+    })
+    if (get().scenarioId === id) get().selectScenario('static-site')
   },
 
   returnToMenu: () => {
