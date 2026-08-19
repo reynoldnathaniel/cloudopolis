@@ -178,6 +178,10 @@ replaying the level by hand.
 
 ---
 
+## License
+
+[MIT](LICENSE) © 2026 Reynold Nathaniel
+
 ## Notes
 
 Costs and capacities are **simplified for gameplay** — directionally true, not a pricing
