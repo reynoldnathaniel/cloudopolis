@@ -188,7 +188,8 @@ const initialNodesFor = (scenario: Scenario): Node[] =>
 
 const isZoneNode = (n: Node) => n.type === 'vpc' || n.type === 'az'
 
-const TICK_MS = 180
+// Exported so the results timeline can label its x-axis in elapsed seconds.
+export const TICK_MS = 180
 const RAMP_TICKS = 5
 // Ticks after the ramp settle before we start scoring a phase.
 const SCORE_AFTER = RAMP_TICKS + 2

@@ -1,112 +1,157 @@
-// The post-run timeline: one SVG drawn from the tick-by-tick history of the
-// run that just finished. Phase bands give the "when", the series give the
-// "what" — served % cratering at the spike, the ASG stair-stepping cost as it
-// scales, a queue backlog piling up and draining.
+// The inline run timeline in the results modal: a compact sparkline of the run
+// just finished, with a scrubbing crosshair. Click it for the full chart with
+// axes, a legend, and callouts (RunTimelineExpanded).
 
-import { useGameStore, type RunPhaseName, type TickPoint } from '../store'
-
-const PHASES: Record<RunPhaseName, { label: string; band: string }> = {
-  baseline: { label: 'baseline', band: 'rgba(56, 189, 248, 0.05)' },
-  spike: { label: '🔥 spike', band: 'rgba(249, 115, 22, 0.12)' },
-  outage: { label: '💥 outage', band: 'rgba(217, 70, 239, 0.12)' },
-  recovery: { label: 'recovery', band: 'rgba(16, 185, 129, 0.06)' },
-  probe: { label: '🕵️', band: 'rgba(245, 158, 11, 0.10)' },
-}
+import { useState } from 'react'
+import { useGameStore } from '../store'
+import { RunTimelineExpanded } from './RunTimelineExpanded'
+import {
+  PHASE_META,
+  areaPath,
+  bandsOf,
+  buildScales,
+  formatSeconds,
+  linePath,
+  makeGeom,
+  secondsAt,
+  seriesFor,
+} from './runChartMath'
 
 const W = 372
 const H = 112
-const TOP = 16 // room for phase labels
-const BOTTOM = H - 6
-const PLOT_H = BOTTOM - TOP
-
-const x = (i: number, n: number) => (n > 1 ? (i / (n - 1)) * W : 0)
-/** Map a 0..1 value into plot y (1 at the top of the plot). */
-const y = (v: number) => BOTTOM - Math.max(0, Math.min(1, v)) * PLOT_H
-
-const polyline = (history: TickPoint[], value: (p: TickPoint) => number) =>
-  history.map((p, i) => `${x(i, history.length).toFixed(1)},${y(value(p)).toFixed(1)}`).join(' ')
-
-/** A polyline closed down to the plot floor, for filled areas. */
-const area = (history: TickPoint[], value: (p: TickPoint) => number) =>
-  `M0,${BOTTOM} L` + polyline(history, value).replace(/ /g, ' L') + ` L${W},${BOTTOM} Z`
-
-function Legend({ swatch, children }: { swatch: string; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-[9px] text-slate-400">
-      <span className={`h-1.5 w-3 rounded-sm ${swatch}`} />
-      {children}
-    </span>
-  )
-}
+const PLOT = { x: 0, y: 16, w: W, h: H - 22 }
 
 export function RunTimeline() {
   const history = useGameStore((s) => s.runHistory)
+  const scenario = useGameStore((s) => s.scenario())
+  const [hover, setHover] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState(false)
+
   if (history.length < 2) return null
 
   const n = history.length
-  const maxRps = Math.max(...history.map((p) => p.rps), 1)
-  const maxBacklog = Math.max(...history.map((p) => p.backlog))
-  const maxCost = Math.max(...history.map((p) => p.cost), 1)
-  const served = (p: TickPoint) => (p.total > 0 ? p.served / p.total : 1)
+  const defs = seriesFor(history)
+  const scales = buildScales(history, defs, scenario.budget)
+  const g = makeGeom(n, PLOT)
+  const bands = bandsOf(history)
+  const floor = PLOT.y + PLOT.h
 
-  // Consecutive same-phase runs become background bands.
-  const bands: { phase: RunPhaseName; from: number; to: number }[] = []
-  for (let i = 0; i < n; i++) {
-    const last = bands[bands.length - 1]
-    if (last && last.phase === history[i].phase) last.to = i
-    else bands.push({ phase: history[i].phase, from: i, to: i })
+  const onPointer = (e: React.PointerEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setHover(g.indexAt(((e.clientX - rect.left) / rect.width) * W))
   }
 
+  // Clamp against the current run: scenarios have different tick counts, so a
+  // hover index held from a previous run must never index past this history.
+  const at = hover === null ? null : Math.min(hover, n - 1)
+  const point = at === null ? null : history[at]
+  const flip = at !== null && g.x(at) / W > 0.6
+
   return (
-    <div className="mt-4">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg border border-slate-800 bg-slate-950/60">
-        {bands.map((b, bi) => {
-          const x0 = x(b.from, n)
-          const x1 = bi === bands.length - 1 ? W : x(b.to + 1, n)
-          const wide = x1 - x0 > 34
-          return (
-            <g key={bi}>
-              <rect x={x0} y={0} width={x1 - x0} height={H} fill={PHASES[b.phase].band} />
-              {bi > 0 && <line x1={x0} y1={TOP - 4} x2={x0} y2={BOTTOM} stroke="#334155" strokeDasharray="2 3" strokeWidth="1" />}
-              {wide && (
-                <text x={(x0 + x1) / 2} y={10} textAnchor="middle" fontSize="7.5" fill="#94a3b8">
-                  {PHASES[b.phase].label}
-                </text>
+    <>
+      <div className="group relative mt-4">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full cursor-pointer touch-none select-none rounded-lg border border-slate-800 bg-slate-950/60 transition group-hover:border-slate-700"
+          onPointerMove={onPointer}
+          onPointerDown={onPointer}
+          onPointerLeave={() => setHover(null)}
+          onClick={() => setExpanded(true)}
+        >
+          {bands.map((b, bi) => {
+            const x0 = g.x(b.from)
+            const x1 = bi === bands.length - 1 ? W : g.x(b.to + 1)
+            return (
+              <g key={bi}>
+                <rect x={x0} y={0} width={Math.max(0, x1 - x0)} height={H} fill={PHASE_META[b.phase].band} />
+                {bi > 0 && (
+                  <line x1={x0} y1={PLOT.y - 4} x2={x0} y2={floor} stroke="#334155" strokeDasharray="2 3" strokeWidth="1" />
+                )}
+                {x1 - x0 > 34 && (
+                  <text x={(x0 + x1) / 2} y={10} textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+                    {PHASE_META[b.phase].label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+
+          {defs.map((d) => (
+            <g key={d.key}>
+              {d.area && (
+                <path d={areaPath(history, d, scales, g, floor)} fill={d.color} opacity={d.key === 'rps' ? 0.12 : 0.18} />
               )}
+              <path
+                d={linePath(history, d, scales, g)}
+                fill="none"
+                stroke={d.color}
+                strokeWidth={d.key === 'served' ? 1.8 : 1.1}
+                strokeDasharray={d.dashed ? '4 2' : undefined}
+                opacity={d.key === 'served' ? 1 : 0.7}
+              />
             </g>
-          )
-        })}
+          ))}
 
-        {/* incoming traffic (area, normalized to its own peak) */}
-        <path d={area(history, (p) => p.rps / maxRps)} fill="rgba(56, 189, 248, 0.12)" />
-        <polyline points={polyline(history, (p) => p.rps / maxRps)} fill="none" stroke="#38bdf8" strokeWidth="1" opacity="0.6" />
+          {at !== null && point && (
+            <g>
+              <line x1={g.x(at)} y1={PLOT.y - 4} x2={g.x(at)} y2={floor} stroke="#e2e8f0" strokeWidth="1" opacity="0.4" />
+              {defs.map((d) => (
+                <circle
+                  key={d.key}
+                  cx={g.x(at)}
+                  cy={g.y(scales.frac(d, d.value(point)))}
+                  r="2.2"
+                  fill={d.color}
+                  stroke="#020617"
+                  strokeWidth="0.8"
+                />
+              ))}
+            </g>
+          )}
+        </svg>
 
-        {/* queue backlog (only when something ever queued) */}
-        {maxBacklog > 0 && (
-          <path d={area(history, (p) => p.backlog / maxBacklog)} fill="rgba(245, 158, 11, 0.18)" />
+        <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-slate-900/80 px-1.5 py-0.5 text-[8.5px] text-slate-400 opacity-0 transition group-hover:opacity-100">
+          ⤢ expand
+        </span>
+
+        {point && at !== null && (
+          <div
+            className="pointer-events-none absolute top-1 z-10 w-[128px] rounded-md border border-slate-700 bg-slate-950/95 p-1.5 shadow-xl"
+            style={{ left: `${(g.x(at) / W) * 100}%`, transform: flip ? 'translateX(-106%)' : 'translateX(6%)' }}
+          >
+            <div className="mb-0.5 flex items-baseline justify-between border-b border-slate-800 pb-0.5">
+              <span className="text-[9px] font-semibold text-slate-300">{PHASE_META[point.phase].label}</span>
+              <span className="text-[9px] tabular-nums text-slate-500">{formatSeconds(secondsAt(at))}</span>
+            </div>
+            {defs.map((d) => (
+              <div key={d.key} className="flex items-center justify-between gap-1.5 text-[9px]">
+                <span className="flex items-center gap-1 text-slate-400">
+                  <span className={`h-1 w-1.5 rounded-sm ${d.swatch}`} />
+                  {d.label}
+                </span>
+                <span className="tabular-nums font-semibold text-slate-200">{d.format(d.value(point))}</span>
+              </div>
+            ))}
+          </div>
         )}
-
-        {/* monthly cost (stair-steps as ASGs scale) */}
-        <polyline
-          points={polyline(history, (p) => p.cost / maxCost)}
-          fill="none"
-          stroke="#a78bfa"
-          strokeWidth="1.2"
-          strokeDasharray="4 2"
-          opacity="0.8"
-        />
-
-        {/* served % — the headline series, drawn last so it sits on top */}
-        <polyline points={polyline(history, served)} fill="none" stroke="#34d399" strokeWidth="1.8" />
-      </svg>
-      <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
-        <Legend swatch="bg-emerald-400">served %</Legend>
-        <Legend swatch="bg-sky-400/50">traffic ({maxRps.toLocaleString()} rps peak)</Legend>
-        {maxBacklog > 0 && (
-          <Legend swatch="bg-amber-400/60">backlog ({Math.round(maxBacklog).toLocaleString()} peak)</Legend>
-        )}
-        <Legend swatch="bg-violet-400">cost (${Math.round(maxCost)}/mo peak)</Legend>
       </div>
-    </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
+        {defs.map((d) => (
+          <span key={d.key} className="inline-flex items-center gap-1 text-[9px] text-slate-400">
+            <span className={`h-1.5 w-3 rounded-sm ${d.swatch}`} />
+            {d.label}
+          </span>
+        ))}
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-[9px] text-cyan-400 transition hover:text-cyan-300"
+        >
+          ⤢ bigger
+        </button>
+      </div>
+
+      {expanded && <RunTimelineExpanded onClose={() => setExpanded(false)} />}
+    </>
   )
 }

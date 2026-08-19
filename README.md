@@ -109,9 +109,12 @@ browser data and moves libraries between machines.
 
 ### Quality of life
 
-- **Run timeline** in the results: a tick-by-tick chart of the run you just watched — phase
-  bands (baseline / 🔥 spike / 💥 outage / 🕵️ probe) under served %, incoming traffic, queue
-  backlog, and cost, so you see *exactly when* the design broke and when it recovered.
+- **Interactive run timeline** in the results: a tick-by-tick chart of the run you just
+  watched — phase bands (baseline / 🔥 spike / 💥 outage / 🕵️ probe) under served %, incoming
+  traffic, queue backlog, and cost, so you see *exactly when* the design broke and when it
+  recovered. Hover to scrub a crosshair and read real values at any moment; click for a
+  full CloudWatch-style view with dual axes (served % left, rps right), a budget reference
+  line, worst-served callout, and a legend that isolates any series.
 - Progress persistence in `localStorage` — best stars per scenario, tutorial completion, and the
   canvas itself, so **Continue** survives a reload.
 - Official **AWS Architecture Icons** in nodes and palette.
