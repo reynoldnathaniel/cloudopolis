@@ -114,6 +114,29 @@ export function setCustomScenarios(list: Scenario[]): void {
 export const initialCustomScenarios: Scenario[] = loadCustomScenarios()
 registerCustomScenarios(initialCustomScenarios)
 
+/**
+ * Parse an exported scenario file — a JSON array of scenarios (the export
+ * format, identical to what localStorage holds) or {scenarios: [...]} for
+ * tolerance. Returns only the entries that survive sanitization, or null
+ * when the file isn't scenario-shaped at all.
+ */
+export function parseScenarioFile(text: string): Scenario[] | null {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    const list = Array.isArray(parsed)
+      ? parsed
+      : typeof parsed === 'object' &&
+          parsed !== null &&
+          Array.isArray((parsed as { scenarios?: unknown }).scenarios)
+        ? (parsed as { scenarios: unknown[] }).scenarios
+        : null
+    if (!list) return null
+    return list.map(sanitizeScenario).filter((s): s is Scenario => s !== null)
+  } catch {
+    return null
+  }
+}
+
 // ---- share codes ----
 // A share code is the scenario JSON, UTF-8 → base64, behind a versioned prefix.
 // Paste-to-import is the whole distribution story: no backend, works in chat.

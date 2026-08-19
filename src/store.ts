@@ -111,6 +111,8 @@ interface GameStore {
    *  markSeen skips the first-time briefing (authors wrote it; importers didn't). */
   saveCustomScenario: (scenario: Scenario, play: boolean, markSeen: boolean) => void
   deleteCustomScenario: (id: string) => void
+  /** Merge scenarios from an exported file; ids already present are skipped (idempotent restore). */
+  importCustomScenarios: (incoming: Scenario[]) => { added: number; skipped: number }
   returnToMenu: () => void
   tutorialNext: () => void
   tutorialSkip: () => void
@@ -320,6 +322,18 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       briefingSeen: get().briefingSeen.filter((b) => b !== id),
     })
     if (get().scenarioId === id) get().selectScenario('static-site')
+  },
+
+  importCustomScenarios: (incoming) => {
+    const existing = get().customScenarios
+    const have = new Set(existing.map((s) => s.id))
+    const fresh = incoming.filter((s) => !have.has(s.id))
+    let order = existing.reduce((m, s) => Math.max(m, s.order), 0)
+    const added = fresh.map((s) => ({ ...s, order: ++order }))
+    const next = [...existing, ...added]
+    setCustomScenarios(next)
+    set({ customScenarios: next })
+    return { added: added.length, skipped: incoming.length - added.length }
   },
 
   returnToMenu: () => {

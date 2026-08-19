@@ -2,7 +2,13 @@
 // save contains, only well-formed, in-range scenarios reach the engine.
 
 import { describe, expect, it } from 'vitest'
-import { decodeShareCode, encodeShareCode, sanitizeScenario, LIMITS } from './customScenarios'
+import {
+  decodeShareCode,
+  encodeShareCode,
+  parseScenarioFile,
+  sanitizeScenario,
+  LIMITS,
+} from './customScenarios'
 import { getScenario, registerCustomScenarios } from './scenarios'
 
 const valid = {
@@ -102,6 +108,28 @@ describe('share codes', () => {
     expect(decodeShareCode('hello world')).toBeNull()
     expect(decodeShareCode('SC1.not-base64!!')).toBeNull()
     expect(decodeShareCode('SC1.' + btoa('{"not":"a scenario"}'))).toBeNull()
+  })
+})
+
+describe('parseScenarioFile', () => {
+  it('parses an exported array, keeping ids (restores are idempotent)', () => {
+    const s = sanitizeScenario(valid)!
+    const list = parseScenarioFile(JSON.stringify([s]))
+    expect(list).toHaveLength(1)
+    expect(list![0].id).toBe(s.id)
+    expect(list![0].title).toBe('Black Friday')
+  })
+
+  it('tolerates a {scenarios: [...]} wrapper and filters junk entries', () => {
+    const s = sanitizeScenario(valid)!
+    const list = parseScenarioFile(JSON.stringify({ scenarios: [s, { not: 'a scenario' }, 7] }))
+    expect(list).toHaveLength(1)
+  })
+
+  it('returns null for non-scenario files without throwing', () => {
+    expect(parseScenarioFile('not json at all')).toBeNull()
+    expect(parseScenarioFile('{"just":"an object"}')).toBeNull()
+    expect(parseScenarioFile('42')).toBeNull()
   })
 })
 

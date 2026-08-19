@@ -32,7 +32,7 @@ Other scripts:
 | --- | --- |
 | `npm run dev` | Vite dev server on port 5173 |
 | `npm run build` | Type-check (`tsc -b`) + production bundle into `dist/` |
-| `npm test` | Vitest — 36 balance tests that pin every level's solution to its star rating |
+| `npm test` | Vitest — engine balance tests (every level's solution pinned to its stars) plus import-validation tests |
 | `npm run preview` | Serve the production build locally |
 
 ---
@@ -101,6 +101,11 @@ That makes SimCloud a workshop tool: author a mission that mirrors a team's real
 drop the code in chat, and everyone designs against it. Imports are sanitized (lengths
 capped, numbers clamped, service ids validated) and always get a fresh id, so a code can
 never overwrite or impersonate an existing scenario.
+
+Custom scenarios live in `localStorage`, so the track header also has **⬇ export / ⬆ import**:
+export downloads your whole library as one JSON file, and import merges a file back in,
+skipping scenarios you already have — an idempotent backup/restore that survives cleared
+browser data and moves libraries between machines.
 
 ### Quality of life
 

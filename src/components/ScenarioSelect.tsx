@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { TRACKS, scenariosInTrack, type Scenario } from '../game/scenarios'
-import { encodeShareCode } from '../game/customScenarios'
+import { encodeShareCode, parseScenarioFile } from '../game/customScenarios'
 import { useGameStore } from '../store'
 
 function Dots({ n }: { n: 1 | 2 | 3 }) {
@@ -114,6 +114,61 @@ function CustomCard({ sc, earned, isCurrent }: { sc: Scenario; earned: number; i
   )
 }
 
+/** Backup/restore for the custom track: download all scenarios as one JSON
+ *  file, or merge a file back in (existing ids are skipped). */
+function ExportImport() {
+  const customScenarios = useGameStore((s) => s.customScenarios)
+  const importCustomScenarios = useGameStore((s) => s.importCustomScenarios)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [msg, setMsg] = useState('')
+
+  const flash = (text: string) => {
+    setMsg(text)
+    setTimeout(() => setMsg(''), 4000)
+  }
+
+  const exportAll = () => {
+    const blob = new Blob([JSON.stringify(customScenarios, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'simcloud-scenarios.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const list = parseScenarioFile(await file.text())
+    if (!list || list.length === 0) {
+      flash('✗ not a valid scenario file')
+      return
+    }
+    const { added, skipped } = importCustomScenarios(list)
+    flash(`✓ imported ${added}${skipped > 0 ? `, skipped ${skipped} already here` : ''}`)
+  }
+
+  const btnCls =
+    'rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200'
+
+  return (
+    <span className="ml-auto flex items-center gap-1.5">
+      {msg && <span className="text-[10px] text-cyan-300">{msg}</span>}
+      {customScenarios.length > 0 && (
+        <button onClick={exportAll} title="Download all custom scenarios as a JSON file" className={btnCls}>
+          ⬇ export
+        </button>
+      )}
+      <button onClick={() => fileRef.current?.click()} title="Merge scenarios from an exported JSON file" className={btnCls}>
+        ⬆ import
+      </button>
+      <input ref={fileRef} type="file" accept=".json,application/json" onChange={onFile} className="hidden" />
+    </span>
+  )
+}
+
 export function ScenarioSelect() {
   const playScenario = useGameStore((s) => s.playScenario)
   const returnToMenu = useGameStore((s) => s.returnToMenu)
@@ -156,6 +211,7 @@ export function ScenarioSelect() {
                   {track.emoji} {track.name}
                 </h2>
                 <span className="text-[11px] text-slate-500">{track.description}</span>
+                {track.id === 'custom' && <ExportImport />}
               </div>
               <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3">
                 {scenariosInTrack(track.id).map((sc) => {
