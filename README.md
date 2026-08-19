@@ -109,6 +109,9 @@ browser data and moves libraries between machines.
 
 ### Quality of life
 
+- **Run timeline** in the results: a tick-by-tick chart of the run you just watched — phase
+  bands (baseline / 🔥 spike / 💥 outage / 🕵️ probe) under served %, incoming traffic, queue
+  backlog, and cost, so you see *exactly when* the design broke and when it recovered.
 - Progress persistence in `localStorage` — best stars per scenario, tutorial completion, and the
   canvas itself, so **Continue** survives a reload.
 - Official **AWS Architecture Icons** in nodes and palette.

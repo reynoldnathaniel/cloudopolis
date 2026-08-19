@@ -62,6 +62,16 @@ interface PhaseAgg {
   total: number
 }
 
+/** One sample per simulation tick, for the post-run timeline chart. */
+export interface TickPoint {
+  rps: number
+  served: number
+  total: number
+  backlog: number
+  cost: number
+  phase: RunPhaseName
+}
+
 export type Screen = 'menu' | 'select' | 'game' | 'editor'
 
 interface GameStore {
@@ -79,6 +89,8 @@ interface GameStore {
   monthlyCost: number
   liveSuccess: number
   results: RunResults | null
+  /** Tick-by-tick record of the last completed run (drives the results timeline; not persisted) */
+  runHistory: TickPoint[]
   /** The AZ struck by the outage event (set during a run of an outage scenario) */
   struckAz: AzId | null
   deadNodeIds: string[]
@@ -242,6 +254,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   monthlyCost: 0,
   liveSuccess: 1,
   results: null,
+  runHistory: [],
   struckAz: null,
   deadNodeIds: [],
   breachedNodeIds: [],
@@ -498,11 +511,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let runServed = 0
     let runTotal = 0
     let runDropped = 0
+    // One sample per tick; published to the store once, when the run ends.
+    const history: TickPoint[] = []
     let blueprintMiss: string[] | null = scenario.requiredServices ? scenario.requiredServices.slice() : null
 
     set({
       phase: 'run',
       results: null,
+      runHistory: [],
       runPhase: 'baseline',
       liveSuccess: 1,
       struckAz,
@@ -545,6 +561,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       const stats = simulateTick(lite, toLiteEdges(edges), rps, scenario, asgCounts, backlogState)
       backlogState = stats.queueBacklogs
       const cost = estimateMonthlyCost(lite, stats.nodeLoads)
+      history.push({
+        rps,
+        served: stats.served,
+        total: stats.total,
+        backlog: Object.values(backlogState).reduce((a, b) => a + b, 0),
+        cost,
+        phase: ph.name,
+      })
       stats.issues.forEach((i) => allIssues.add(i))
       runServed += stats.served
       runDropped += stats.dropped
@@ -646,6 +670,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
           set({
             phase: 'results',
+            runHistory: history,
             bestStars: {
               ...get().bestStars,
               [scenario.id]: Math.max(get().bestStars[scenario.id] ?? 0, stars),

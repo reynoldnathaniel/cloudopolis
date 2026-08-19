@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { TRACKS, nextScenario } from '../game/scenarios'
 import { SERVICES } from '../game/services'
 import { useGameStore } from '../store'
+import { RunTimeline } from './RunTimeline'
 
 function Star({ earned, delay }: { earned: boolean; delay: number }) {
   return (
@@ -64,7 +65,7 @@ export function ResultsModal() {
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.9, y: 20, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-            className="w-[420px] max-w-[92vw] rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+            className="max-h-[92vh] w-[420px] max-w-[92vw] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
           >
             <div className="text-center">
               <div className="flex justify-center gap-2">
@@ -77,6 +78,8 @@ export function ResultsModal() {
                 {track?.emoji} {track?.name} · {scenario.title}
               </p>
             </div>
+
+            <RunTimeline />
 
             <div className="mt-4 space-y-2">
               {results.mode === 'async' ? (
