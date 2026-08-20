@@ -5,6 +5,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  ControlButton,
   MiniMap,
   useReactFlow,
   type Node,
@@ -27,6 +28,7 @@ import { ScenarioSelect } from './components/ScenarioSelect'
 import { ScenarioEditor } from './components/ScenarioEditor'
 import { TutorialCoach, SandboxCoach } from './components/TutorialCoach'
 import { CATEGORY_COLORS, SERVICES } from './game/services'
+import { exportCanvasPng } from './game/exportImage'
 import { SANDBOX_ID } from './game/scenarios'
 
 const nodeTypes = { service: ServiceNode, users: UsersNode, vpc: VpcNode, az: AzNode }
@@ -62,9 +64,10 @@ function Canvas() {
   const assignZone = useGameStore((s) => s.assignZone)
   const editing = useGameStore((s) => s.phase === 'edit')
   const hasVpc = useGameStore((s) => s.scenario().hasVpc === true)
+  const scenarioTitle = useGameStore((s) => s.scenario().title)
   const tutorialActive = useGameStore((s) => s.tutorialStep !== null)
   const sandboxTourActive = useGameStore((s) => s.sandboxTutorialStep !== null)
-  const { screenToFlowPosition, getInternalNode } = useReactFlow()
+  const { screenToFlowPosition, getInternalNode, getNodesBounds } = useReactFlow()
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -138,7 +141,15 @@ function Canvas() {
         proOptions={{ hideAttribution: false }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.5} color="#1e293b" />
-        <Controls position="bottom-left" showInteractive={false} />
+        <Controls position="bottom-left" showInteractive={false}>
+          <ControlButton
+            onClick={() => void exportCanvasPng(getNodesBounds(nodes), scenarioTitle)}
+            title="Download this architecture as a PNG"
+            aria-label="Export architecture as PNG"
+          >
+            📸
+          </ControlButton>
+        </Controls>
         <MiniMap
           position="bottom-right"
           nodeColor={minimapColor}

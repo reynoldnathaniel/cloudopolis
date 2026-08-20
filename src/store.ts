@@ -92,6 +92,8 @@ interface GameStore {
   results: RunResults | null
   /** Tick-by-tick record of the last completed run (drives the results timeline; not persisted) */
   runHistory: TickPoint[]
+  /** Presenter control: the simulation is frozen (works in scenarios and the sandbox) */
+  paused: boolean
   /** The AZ struck by the outage event (set during a run of an outage scenario) */
   struckAz: AzId | null
   deadNodeIds: string[]
@@ -165,6 +167,10 @@ interface GameStore {
   /** Re-parent a zonal node into an AZ box (or out of all of them). Position is relative to the new parent. */
   assignZone: (nodeId: string, az: AzId | null, position: { x: number; y: number }) => void
   startRun: () => void
+  /** Freeze / unfreeze the running simulation */
+  togglePause: () => void
+  /** Advance exactly one tick while paused */
+  stepTick: () => void
   stopRun: () => void
   backToEdit: () => void
   clearCanvas: () => void
@@ -223,6 +229,9 @@ const RAMP_TICKS = 5
 const SCORE_AFTER = RAMP_TICKS + 2
 
 let timer: ReturnType<typeof setInterval> | null = null
+// Set by whichever run loop is active, so stepTick() can advance exactly one
+// tick without the loop having to poll for it.
+let stepOnce: (() => void) | null = null
 let idCounter = 0
 
 // ---- persistence (localStorage) ----
@@ -285,6 +294,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   liveSuccess: 1,
   results: null,
   runHistory: [],
+  paused: false,
   struckAz: null,
   deadNodeIds: [],
   breachedNodeIds: [],
@@ -573,6 +583,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       let backlogs: Record<string, number> = {}
       set({
         phase: 'run',
+        paused: false,
         results: null,
         runHistory: [],
         runPhase: 'baseline',
@@ -581,7 +592,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         deadNodeIds: [],
       })
 
-      timer = setInterval(() => {
+      const sandboxTick = () => {
         const { nodes, edges, sandboxRps, sandboxDeadAzs, sandboxNeed } = get()
         // Read the workload toggle live, so switching static/app mid-run applies.
         const live = { ...scenario, need: sandboxNeed }
@@ -614,6 +625,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           deadNodeIds: deadIds,
           sandboxHint: tipsForIssues([...stats.issues])[0] ?? null,
         })
+      }
+      stepOnce = sandboxTick
+      timer = setInterval(() => {
+        if (!get().paused) sandboxTick()
       }, TICK_MS)
       return
     }
@@ -662,7 +677,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let tickInPhase = 0
     let prevRps = 0
     let ticksDone = 0
-    const startedAt = performance.now()
+    // Mutable so pausing can shift it: on resume we push the start forward by
+    // however long we were frozen, or the loop would fast-forward through every
+    // tick it "missed" while the presenter was talking.
+    let startedAt = performance.now()
+    let pausedSince: number | null = null
 
     // Auto Scaling groups start at minimum size and react to observed load.
     const fleetCounts: Record<string, number> = {}
@@ -685,6 +704,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
     set({
       phase: 'run',
+      paused: false,
       results: null,
       runHistory: [],
       runPhase: 'baseline',
@@ -839,6 +859,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
           set({
             phase: 'results',
+            paused: false,
             runHistory: history,
             bestStars: {
               ...get().bestStars,
@@ -869,7 +890,22 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // each fire we process however many ticks wall-clock time says are owed
     // (capped per fire to avoid jank after a long throttle).
     const totalTicks = phases.reduce((sum, p) => sum + p.ticks, 0)
+    stepOnce = () => {
+      if (ticksDone >= totalTicks) return
+      doTick()
+      // Keep the clock in step with the manual advance so pacing stays exact
+      // once the run resumes.
+      startedAt += TICK_MS
+    }
     timer = setInterval(() => {
+      if (get().paused) {
+        if (pausedSince === null) pausedSince = performance.now()
+        return
+      }
+      if (pausedSince !== null) {
+        startedAt += performance.now() - pausedSince
+        pausedSince = null
+      }
       const owed = Math.min(totalTicks, Math.floor((performance.now() - startedAt) / TICK_MS))
       let burst = 0
       while (ticksDone < owed && burst < 20 && timer !== null) {
@@ -879,12 +915,24 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     }, TICK_MS)
   },
 
+  togglePause: () => {
+    if (get().phase !== 'run') return
+    set({ paused: !get().paused })
+  },
+
+  stepTick: () => {
+    if (get().phase !== 'run' || !get().paused) return
+    stepOnce?.()
+  },
+
   stopRun: () => {
     if (timer) clearInterval(timer)
     timer = null
+    stepOnce = null
     if (get().phase === 'run') {
       set({
         phase: 'edit',
+        paused: false,
         edgeFlows: {},
         nodeStats: {},
         currentRps: 0,

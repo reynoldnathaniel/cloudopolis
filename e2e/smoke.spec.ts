@@ -133,6 +133,89 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('Well-Architected!')).toBeVisible()
   })
 
+  test('presenter controls freeze the run and step it forward', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+    await connect(page, '.react-flow__node[data-id="users"]', '.react-flow__node[data-id^="cloudfront"]')
+    await connect(page, '.react-flow__node[data-id^="cloudfront"]', '.react-flow__node[data-id^="s3"]')
+    await page.getByRole('button', { name: /Simulate/ }).click()
+
+    const step = page.getByRole('button', { name: 'Step one tick' })
+    await expect(step).toBeDisabled() // only meaningful while frozen
+
+    await page.getByRole('button', { name: 'Pause' }).click()
+    await expect(page.getByText('⏸ PAUSED')).toBeVisible()
+    await expect(step).toBeEnabled()
+
+    // Hold the freeze past the whole baseline phase; a broken pause would burst
+    // through every missed tick on resume instead of shifting its clock.
+    await page.waitForTimeout(5_000)
+    await expect(page.getByText('⏸ PAUSED')).toBeVisible()
+    await step.click()
+
+    await page.getByRole('button', { name: 'Resume' }).click()
+    await expect(page.getByText('BASELINE')).toBeVisible()
+    await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
+  })
+
+  test('the canvas exports a PNG of the architecture', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+
+    // Capture the generated data URL rather than writing a file to disk.
+    await page.evaluate(() => {
+      ;(window as unknown as { __png?: string }).__png = undefined
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.download) (window as unknown as { __png?: string }).__png = this.href
+      }
+    })
+    await page.getByRole('button', { name: 'Export architecture as PNG' }).click()
+
+    await expect
+      .poll(async () => page.evaluate(() => (window as unknown as { __png?: string }).__png?.length ?? 0), {
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(10_000) // a real render, not a blank or truncated image
+
+    const href = await page.evaluate(() => (window as unknown as { __png?: string }).__png ?? '')
+    expect(href.startsWith('data:image/png;base64,')).toBe(true)
+  })
+
+  test('the results modal exports a share card', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+    await connect(page, '.react-flow__node[data-id="users"]', '.react-flow__node[data-id^="cloudfront"]')
+    await connect(page, '.react-flow__node[data-id^="cloudfront"]', '.react-flow__node[data-id^="s3"]')
+    await page.getByRole('button', { name: /Simulate/ }).click()
+    await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
+
+    await page.evaluate(() => {
+      ;(window as unknown as { __png?: string }).__png = undefined
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.download) (window as unknown as { __png?: string }).__png = this.href
+      }
+    })
+    await page.getByRole('button', { name: /Share card/ }).click()
+
+    await expect
+      .poll(async () => page.evaluate(() => (window as unknown as { __png?: string }).__png?.length ?? 0), {
+        timeout: 25_000,
+      })
+      .toBeGreaterThan(10_000)
+  })
+
   test('the scenario editor saves a custom scenario', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /New scenario/ }).click()

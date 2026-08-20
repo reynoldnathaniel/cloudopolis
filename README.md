@@ -130,6 +130,16 @@ you, then walks through the controls that make the sandbox different: turn the t
 until the servers overload, bring it back down, kill a zone and watch the failover, and
 fire the security probe. Replay it any time from the sandbox panel.
 
+### Presenting and sharing
+
+- **Presenter controls** in the run HUD: **⏸ pause** freezes the simulation mid-spike so you
+  can point at the saturated database, and **⏭ step** walks it forward one tick at a time while
+  you narrate. Pausing shifts the run's clock rather than stopping it, so resuming continues at
+  the right pace instead of fast-forwarding through everything it missed.
+- **📸 PNG export** on the canvas controls downloads the current architecture at any time.
+- **📸 Share card** in the results modal composes that architecture under a header with the
+  scenario, the stars earned, and the monthly cost — the thing to drop in Slack after a workshop.
+
 ### Quality of life
 
 - **Interactive run timeline** in the results: a tick-by-tick chart of the run you just

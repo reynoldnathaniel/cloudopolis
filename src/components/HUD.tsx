@@ -17,6 +17,9 @@ export function HUD() {
   const success = useGameStore((s) => s.liveSuccess)
   const cost = useGameStore((s) => s.monthlyCost)
   const scenario = useGameStore((s) => s.scenario())
+  const paused = useGameStore((s) => s.paused)
+  const togglePause = useGameStore((s) => s.togglePause)
+  const stepTick = useGameStore((s) => s.stepTick)
   const queued = useGameStore((s) =>
     Math.round(Object.values(s.nodeStats).reduce((sum, n) => sum + (n.backlog ?? 0), 0)),
   )
@@ -37,8 +40,12 @@ export function HUD() {
           className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2"
         >
           <div className="flex items-center gap-5 rounded-2xl border border-slate-700 bg-slate-900/90 px-5 py-2.5 shadow-2xl backdrop-blur">
-            <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold tracking-widest ${style.cls}`}>
-              {style.label}
+            <span
+              className={`rounded-md border px-2 py-0.5 text-[10px] font-bold tracking-widest ${
+                paused ? 'border-slate-500 bg-slate-700/40 text-slate-300' : style.cls
+              }`}
+            >
+              {paused ? '⏸ PAUSED' : style.label}
             </span>
             {runPhase === 'spike' && (
               <span className="text-[11px] font-semibold text-red-300">{scenario.spikeLabel}</span>
@@ -76,6 +83,32 @@ export function HUD() {
                 <div className="text-[8px] uppercase tracking-wider text-slate-500">queued</div>
               </div>
             )}
+
+            {/* Presenter controls: freeze the run mid-sentence, then walk it
+                forward a tick at a time while narrating. */}
+            <div className="pointer-events-auto flex items-center gap-1 border-l border-slate-700 pl-3">
+              <button
+                onClick={togglePause}
+                title={paused ? 'Resume the simulation' : 'Pause the simulation'}
+                aria-label={paused ? 'Resume' : 'Pause'}
+                className={`rounded-lg border px-2 py-1 text-[12px] transition ${
+                  paused
+                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                    : 'border-slate-600 text-slate-300 hover:border-slate-400 hover:text-white'
+                }`}
+              >
+                {paused ? '▶' : '⏸'}
+              </button>
+              <button
+                onClick={stepTick}
+                disabled={!paused}
+                title="Advance one tick"
+                aria-label="Step one tick"
+                className="rounded-lg border border-slate-600 px-2 py-1 text-[12px] text-slate-300 transition hover:border-slate-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                ⏭
+              </button>
+            </div>
           </div>
         </motion.div>
       )}

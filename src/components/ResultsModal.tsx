@@ -1,8 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion'
+import { useReactFlow } from '@xyflow/react'
 import { TRACKS, nextScenario } from '../game/scenarios'
 import { SERVICES } from '../game/services'
+import { useState } from 'react'
 import { useGameStore } from '../store'
 import { RunTimeline } from './RunTimeline'
+import { exportShareCard } from '../game/exportImage'
 
 function Star({ earned, delay }: { earned: boolean; delay: number }) {
   return (
@@ -33,6 +36,9 @@ function Pillar({ label, value, pass, target }: { label: string; value: string; 
 
 export function ResultsModal() {
   const results = useGameStore((s) => s.results)
+  const nodes = useGameStore((s) => s.nodes)
+  const [shot, setShot] = useState<'idle' | 'working' | 'done'>('idle')
+  const { getNodesBounds } = useReactFlow()
   const phase = useGameStore((s) => s.phase)
   const backToEdit = useGameStore((s) => s.backToEdit)
   const startRun = useGameStore((s) => s.startRun)
@@ -174,7 +180,29 @@ export function ResultsModal() {
               </div>
             )}
 
-            <div className="mt-5 flex gap-2">
+            <button
+              onClick={async () => {
+                if (!results) return
+                setShot('working')
+                const ok = await exportShareCard(getNodesBounds(nodes), {
+                  emoji: scenario.emoji,
+                  title: scenario.title,
+                  track: `${track?.emoji ?? ''} ${track?.name ?? ''}`.trim(),
+                  stars: results.stars,
+                  cost: results.costAtBaseline,
+                  budget: results.budget,
+                  origin: window.location.host,
+                })
+                setShot(ok ? 'done' : 'idle')
+                setTimeout(() => setShot('idle'), 2500)
+              }}
+              disabled={shot === 'working'}
+              className="mt-4 w-full rounded-xl border border-slate-700 py-2 text-[12px] font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-50"
+            >
+              {shot === 'working' ? '📸 rendering…' : shot === 'done' ? '✓ saved' : '📸 Share card'}
+            </button>
+
+            <div className="mt-3 flex gap-2">
               <button
                 onClick={backToEdit}
                 className="flex-1 rounded-xl border border-slate-600 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-slate-400 hover:text-white"
