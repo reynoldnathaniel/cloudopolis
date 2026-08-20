@@ -35,6 +35,7 @@ const TUTORIAL_STEP_COUNT = TUTORIAL_STEPS.length
 export type GamePhase = 'edit' | 'run' | 'results'
 export type RunPhaseName = 'baseline' | 'spike' | 'recovery' | 'outage' | 'probe'
 export type AzId = 'a' | 'b'
+export type RegionId = 'use1' | 'apne2'
 
 export interface RunResults {
   stars: number
@@ -96,6 +97,8 @@ interface GameStore {
   paused: boolean
   /** The AZ struck by the outage event (set during a run of an outage scenario) */
   struckAz: AzId | null
+  /** The Region struck by the outage event (multi-region scenarios only) */
+  struckRegion: RegionId | null
   deadNodeIds: string[]
   /** Nodes flagged as internet-exposed by the security probe */
   breachedNodeIds: string[]
@@ -166,6 +169,8 @@ interface GameStore {
   addServiceNode: (serviceId: string, position: { x: number; y: number }, exact?: boolean) => void
   /** Re-parent a zonal node into an AZ box (or out of all of them). Position is relative to the new parent. */
   assignZone: (nodeId: string, az: AzId | null, position: { x: number; y: number }) => void
+  /** Re-parent a node into a Region box (or out of both). Position is relative to the new parent. */
+  assignRegion: (nodeId: string, region: RegionId | null, position: { x: number; y: number }) => void
   startRun: () => void
   /** Freeze / unfreeze the running simulation */
   togglePause: () => void
@@ -182,6 +187,18 @@ export const VPC_RECT = { x: 300, y: 60, w: 660, h: 440 }
 export const AZ_RECTS: Record<AzId, { x: number; y: number; w: number; h: number }> = {
   a: { x: 330, y: 130, w: 290, h: 340 },
   b: { x: 640, y: 130, w: 290, h: 340 },
+}
+
+// Multi-region scenarios swap the VPC/AZ boxes for two Region boxes, stacked so
+// each one is wide enough to hold a full left-to-right chain (router → compute →
+// data). Global services live in the gutter to their left, beside Users.
+export const REGIONS: { id: RegionId; name: string; flag: string }[] = [
+  { id: 'use1', name: 'us-east-1', flag: '🇺🇸' },
+  { id: 'apne2', name: 'ap-northeast-2', flag: '🇰🇷' },
+]
+export const REGION_RECTS: Record<RegionId, { x: number; y: number; w: number; h: number }> = {
+  use1: { x: 350, y: 40, w: 620, h: 240 },
+  apne2: { x: 350, y: 320, w: 620, h: 240 },
 }
 
 const USERS_NODE: Node = {
@@ -217,10 +234,27 @@ const zoneNodes = (): Node[] => [
   })),
 ]
 
-const initialNodesFor = (scenario: Scenario): Node[] =>
-  scenario.hasVpc ? [...zoneNodes(), USERS_NODE] : [USERS_NODE]
+const regionNodes = (): Node[] =>
+  REGIONS.map((r) => ({
+    id: `region-${r.id}`,
+    type: 'region',
+    position: { x: REGION_RECTS[r.id].x, y: REGION_RECTS[r.id].y },
+    data: { region: r.id, name: r.name, flag: r.flag, w: REGION_RECTS[r.id].w, h: REGION_RECTS[r.id].h },
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    zIndex: -10,
+  }))
 
-const isZoneNode = (n: Node) => n.type === 'vpc' || n.type === 'az'
+const initialNodesFor = (scenario: Scenario): Node[] =>
+  scenario.multiRegion
+    ? [...regionNodes(), USERS_NODE]
+    : scenario.hasVpc
+      ? [...zoneNodes(), USERS_NODE]
+      : [USERS_NODE]
+
+const isZoneNode = (n: Node) => n.type === 'vpc' || n.type === 'az' || n.type === 'region'
 
 // Exported so the results timeline can label its x-axis in elapsed seconds.
 export const TICK_MS = 180
@@ -296,6 +330,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   runHistory: [],
   paused: false,
   struckAz: null,
+  struckRegion: null,
   deadNodeIds: [],
   breachedNodeIds: [],
   bestStars: SAVED.bestStars ?? {},
@@ -498,6 +533,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       monthlyCost: 0,
       liveSuccess: 1,
       struckAz: null,
+      struckRegion: null,
       deadNodeIds: [],
       breachedNodeIds: [],
     })
@@ -524,6 +560,27 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       type: 'service',
       position,
       data: { serviceId },
+    }
+
+    // Same idea one level up: regional services spawn in the emptier Region,
+    // global ones (DNS, CDN) in the gutter beside Users.
+    if (!exact && scenario.multiRegion) {
+      if (def.global) {
+        node.position = { x: 165 + Math.random() * 20, y: 180 + Math.random() * 200 }
+      } else {
+        const counts: Record<RegionId, number> = { use1: 0, apne2: 0 }
+        for (const n of get().nodes) {
+          const region = (n.data as { region?: RegionId }).region
+          if (n.type === 'service' && region) counts[region] += 1
+        }
+        const region: RegionId = counts.use1 <= counts.apne2 ? 'use1' : 'apne2'
+        const slot = counts[region]
+        node.parentId = `region-${region}`
+        node.data = { serviceId, region }
+        node.position = { x: 30 + (slot % 3) * 195, y: 50 + Math.floor(slot / 3) * 90 }
+      }
+      set({ nodes: [...get().nodes, node] })
+      return
     }
 
     // Click-to-add in VPC levels places nodes sensibly: zonal services spawn
@@ -563,6 +620,21 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     })
   },
 
+  assignRegion: (nodeId, region, position) => {
+    set({
+      nodes: get().nodes.map((n) => {
+        if (n.id !== nodeId) return n
+        const data = { ...(n.data as { serviceId?: string }), region: region ?? undefined }
+        return {
+          ...n,
+          parentId: region ? `region-${region}` : undefined,
+          position,
+          data,
+        }
+      }),
+    })
+  },
+
   startRun: () => {
     const state = get()
     if (state.phase === 'run') return
@@ -589,6 +661,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         runPhase: 'baseline',
         liveSuccess: 1,
         struckAz: null,
+        struckRegion: null,
         deadNodeIds: [],
       })
 
@@ -653,9 +726,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           { name: 'recovery', rps: scenario.baselineRps, ticks: 6 },
         ]
 
-    // The outage strikes the AZ holding the most zonal nodes — the worst case.
+    // The outage strikes whichever box holds the most at-risk nodes — the worst
+    // case, so a lopsided "two regions" that is really one region plus a spare
+    // database loses the busy half.
     let struckAz: AzId | null = null
-    if (scenario.hasOutage) {
+    let struckRegion: RegionId | null = null
+    if (scenario.hasOutage && scenario.multiRegion) {
+      const counts: Record<RegionId, number> = { use1: 0, apne2: 0 }
+      for (const n of state.nodes) {
+        const region = (n.data as { region?: RegionId }).region
+        if (n.type === 'service' && region && !SERVICES[serviceIdOf(n)].global) counts[region] += 1
+      }
+      struckRegion = counts.use1 >= counts.apne2 ? 'use1' : 'apne2'
+    } else if (scenario.hasOutage) {
       const counts: Record<AzId, number> = { a: 0, b: 0 }
       for (const n of state.nodes) {
         const az = (n.data as { az?: AzId }).az
@@ -710,6 +793,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       runPhase: 'baseline',
       liveSuccess: 1,
       struckAz,
+      struckRegion,
       deadNodeIds: [],
       breachedNodeIds: [],
     })
@@ -728,8 +812,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         const serviceId = serviceIdOf(n)
         const def = SERVICES[serviceId]
         const az = ((n.data as { az?: AzId }).az ?? null) as AzId | null
-        const unplaced = scenario.hasVpc === true && def.zonal && az === null
-        const dead = outageNow && struckAz !== null && def.zonal && az === struckAz
+        // Multi-region: nothing but DNS and the CDN edge escapes a Region, so
+        // "is it placed" and "did it just die" both key off the Region box
+        // rather than off `zonal`.
+        const region = ((n.data as { region?: RegionId }).region ?? null) as RegionId | null
+        const unplaced =
+          scenario.multiRegion === true
+            ? def.global !== true && region === null
+            : scenario.hasVpc === true && def.zonal && az === null
+        const dead =
+          outageNow &&
+          (scenario.multiRegion === true
+            ? struckRegion !== null && def.global !== true && region === struckRegion
+            : struckAz !== null && def.zonal && az === struckAz)
         if (dead) deadIds.push(n.id)
         lite.push({ id: n.id, serviceId, az, dead, unplaced })
       }
@@ -845,7 +940,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           const star3 = star2 && costAtBaseline <= scenario.budget
           const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 
-          const tips = tipsForIssues([...allIssues])
+          const tips = tipsForIssues([...allIssues], { multiRegion: scenario.multiRegion })
           if (findings) tips.push(...findings.map((f) => f.tip))
           if (blueprintMiss && blueprintMiss.length > 0) {
             const names = blueprintMiss.map((id) => SERVICES[id]?.name ?? id).join(', ')
@@ -938,6 +1033,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         currentRps: 0,
         deadNodeIds: [],
         struckAz: null,
+        struckRegion: null,
         breachedNodeIds: [],
       })
     }
@@ -953,6 +1049,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       results: null,
       deadNodeIds: [],
       struckAz: null,
+      struckRegion: null,
       breachedNodeIds: [],
     })
   },
@@ -968,6 +1065,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       phase: 'edit',
       deadNodeIds: [],
       struckAz: null,
+      struckRegion: null,
       breachedNodeIds: [],
     })
   },

@@ -17,6 +17,7 @@ export function HUD() {
   const success = useGameStore((s) => s.liveSuccess)
   const cost = useGameStore((s) => s.monthlyCost)
   const scenario = useGameStore((s) => s.scenario())
+  const multiRegion = useGameStore((s) => s.scenario().multiRegion === true)
   const paused = useGameStore((s) => s.paused)
   const togglePause = useGameStore((s) => s.togglePause)
   const stepTick = useGameStore((s) => s.stepTick)
@@ -26,6 +27,10 @@ export function HUD() {
 
   const running = phase === 'run'
   const style = PHASE_STYLE[runPhase]
+  // The outage chip is the one phase label that depends on which level of the
+  // hierarchy just failed.
+  const phaseLabel =
+    runPhase === 'outage' && multiRegion ? 'REGION OUTAGE' : style.label
   const successPct = Math.round(success * 100)
   const successColor = successPct >= 98 ? 'text-emerald-400' : successPct >= 90 ? 'text-amber-400' : 'text-red-400'
   const overBudget = cost > scenario.budget
@@ -45,7 +50,7 @@ export function HUD() {
                 paused ? 'border-slate-500 bg-slate-700/40 text-slate-300' : style.cls
               }`}
             >
-              {paused ? '⏸ PAUSED' : style.label}
+              {paused ? '⏸ PAUSED' : phaseLabel}
             </span>
             {runPhase === 'spike' && (
               <span className="text-[11px] font-semibold text-red-300">{scenario.spikeLabel}</span>

@@ -7,6 +7,7 @@ import { useGameStore } from '../store'
 import { RunTimelineExpanded } from './RunTimelineExpanded'
 import {
   PHASE_META,
+  phaseLabel,
   areaPath,
   bandsOf,
   buildScales,
@@ -23,6 +24,7 @@ const PLOT = { x: 0, y: 16, w: W, h: H - 22 }
 
 export function RunTimeline() {
   const history = useGameStore((s) => s.runHistory)
+  const multiRegion = useGameStore((s) => s.scenario().multiRegion === true)
   const scenario = useGameStore((s) => s.scenario())
   const [hover, setHover] = useState<number | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -69,7 +71,7 @@ export function RunTimeline() {
                 )}
                 {x1 - x0 > 34 && (
                   <text x={(x0 + x1) / 2} y={10} textAnchor="middle" fontSize="7.5" fill="#94a3b8">
-                    {PHASE_META[b.phase].label}
+                    {phaseLabel(b.phase, multiRegion)}
                   </text>
                 )}
               </g>
@@ -120,7 +122,7 @@ export function RunTimeline() {
             style={{ left: `${(g.x(at) / W) * 100}%`, transform: flip ? 'translateX(-106%)' : 'translateX(6%)' }}
           >
             <div className="mb-0.5 flex items-baseline justify-between border-b border-slate-800 pb-0.5">
-              <span className="text-[9px] font-semibold text-slate-300">{PHASE_META[point.phase].label}</span>
+              <span className="text-[9px] font-semibold text-slate-300">{phaseLabel(point.phase, multiRegion)}</span>
               <span className="text-[9px] tabular-nums text-slate-500">{formatSeconds(secondsAt(at))}</span>
             </div>
             {defs.map((d) => (

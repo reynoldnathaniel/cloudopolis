@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 5 tracks, 10 scenarios
+### 6 tracks, 11 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -68,6 +68,7 @@ style you want to learn.
 | 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
 | 📨 **Event-Driven** | Order Storm | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing |
 | 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
+| 🌍 **Going Global** | The Blackout | An entire Region dies. Route 53 health checks fail traffic over to a complete second stack — and because the survivor absorbs *all* the load, only elastic services make two full regions affordable |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
 
 ### Simulation mechanics
@@ -78,6 +79,12 @@ style you want to learn.
   The **Users** node does not: DNS is dumb, which is exactly why you need a load balancer.
 - **AZ outage** — mid-run an entire Availability Zone dies. Everything zonal inside it goes with
   it. Real redundancy means one of everything zonal in *each* zone.
+- **Region outage** — the multi-region finale zooms out a level: the canvas shows two **Region**
+  boxes instead of AZs, every service except DNS and the CDN edge must live inside one, and the
+  outage takes a whole Region with everything in it. The failover lesson falls straight out of
+  the existing health model — routers health-check their targets and Users do not, so wiring
+  Users to both Regions keeps walking half of every request into the dead one, while Route 53
+  in front routes 100% to the survivor.
 - **Security probe** — attackers scan for resources wired straight to Users. Public S3 buckets,
   exposed databases and caches, and naked compute all fail the Security pillar. Only CloudFront,
   ALB, and API Gateway belong on the internet edge.
@@ -92,7 +99,7 @@ style you want to learn.
 - **Async pipelines** — SQS/Kinesis nodes hold a live backlog that drains at consumer capacity;
   SNS fans out a copy per subscriber. Async scenarios are scored on **Delivery / Durability /
   Drain** instead of instant service.
-- **VPC and Availability Zone containers** — React Flow subflows with drag re-parenting.
+- **VPC, Availability Zone, and Region containers** — React Flow subflows with drag re-parenting.
 
 ### The scenario editor
 
@@ -166,8 +173,8 @@ Two layers, deliberately split:
 - **`npm run test:e2e`** — Playwright drives a real Chromium through the journeys a player
   actually clicks: menu → tutorial → build a design by dragging edges between node handles →
   run the full ~15 s simulation → three stars → expand the timeline → author a scenario →
-  the sandbox's endless run. It runs against a **production build** on `vite preview`, so it
-  tests exactly what deploys. ~60 seconds.
+  the sandbox's endless run → a Region going dark behind Route 53. It runs against a
+  **production build** on `vite preview`, so it tests exactly what deploys. ~2 minutes.
 
 First time only, fetch the browser binary:
 
@@ -253,12 +260,11 @@ replaying the level by hand.
 
 ## Roadmap
 
-- Sandbox mode (no budget, traffic sliders) — a whiteboard that runs
-- Post-run timeline chart: served %, cost, and backlog over the run
-- A retrieve-then-generate chain mechanic, unlocking a RAG scenario for the GenAI track
-- Containers track (ECS/Fargate) as a third compute model
-- Multi-region DR finale · WAF + DDoS event · EventBridge · Firehose → S3
-- Export architecture as PNG · Korean localization · sound effects
+- WAF + DDoS event, extending the security probe into a scenario of its own
+- EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
+- Lambda cold starts · RDS read replicas · mid-run decision events
+- "Show me a 3-star answer" solution reveal after a few failed runs
+- Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---
 

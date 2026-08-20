@@ -16,6 +16,10 @@ export const PHASE_META: Record<RunPhaseName, { label: string; band: string }> =
   probe: { label: '🕵️ probe', band: 'rgba(245, 158, 11, 0.10)' },
 }
 
+/** Band label for a phase — the outage band names whatever level actually failed. */
+export const phaseLabel = (phase: RunPhaseName, multiRegion = false): string =>
+  phase === 'outage' && multiRegion ? '🌑 region' : PHASE_META[phase].label
+
 export type SeriesKey = 'served' | 'rps' | 'backlog' | 'cost'
 
 export interface SeriesDef {

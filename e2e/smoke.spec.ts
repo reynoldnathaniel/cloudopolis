@@ -72,7 +72,7 @@ test.describe('SimCloud smoke', () => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await expect(page.getByRole('heading', { name: 'Choose your scenario' })).toBeVisible()
 
-    for (const track of ['Foundations', 'GenAI', 'Event-Driven', 'Streaming', 'My Scenarios']) {
+    for (const track of ['Foundations', 'Containers', 'GenAI', 'Event-Driven', 'Streaming', 'Going Global', 'My Scenarios']) {
       await expect(page.getByRole('heading', { name: new RegExp(track) })).toBeVisible()
     }
     for (const title of ['Launch Day', 'PhotoShare', 'IPO Day', 'Prompt Rush', 'Grounded', 'Order Storm', 'Click Stream']) {
@@ -106,6 +106,58 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ 100%').first()).toBeVisible()
     await expect(page.getByText('clean')).toBeVisible()
     await expect(page.getByText('✓ $15/mo')).toBeVisible()
+  })
+
+  test('The Blackout: Route 53 fails over when a whole Region goes dark', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /The Blackout/ }).click()
+
+    await expect(page.getByRole('heading', { level: 2, name: 'The Blackout' })).toBeVisible()
+    await expect(page.getByText(/Survive the loss of an entire/)).toBeVisible()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    // The canvas is Regions, not AZs.
+    await expect(page.getByText('Region · us-east-1')).toBeVisible()
+    await expect(page.getByText('Region · ap-northeast-2')).toBeVisible()
+
+    // Click order decides auto-placement: regional services alternate between
+    // the two Region boxes, global ones (Route 53) stay outside both.
+    await palette(page, 'Amazon Route 53').click()
+    await palette(page, 'Application Load Balancer').click()
+    await palette(page, 'Amazon ECS on AWS Fargate').click()
+    await palette(page, 'Amazon DynamoDB').click()
+    await palette(page, 'Application Load Balancer').click()
+    await palette(page, 'Amazon ECS on AWS Fargate').click()
+    await palette(page, 'Amazon DynamoDB').click()
+
+    // us-east-1 gets alb-2 / fargate-6 / dynamodb-4; ap-northeast-2 the rest.
+    // Nothing should be begging for a home.
+    await expect(page.getByText(/needs Region/)).toHaveCount(0)
+    await fitView(page)
+
+    const n = (id: string) => `.react-flow__node[data-id="${id}"]`
+    await connect(page, n('users'), n('route53-1'))
+    await connect(page, n('route53-1'), n('alb-2'))
+    await connect(page, n('alb-2'), n('fargate-6'))
+    await connect(page, n('fargate-6'), n('dynamodb-4'))
+    await connect(page, n('route53-1'), n('alb-5'))
+    await connect(page, n('alb-5'), n('fargate-3'))
+    await connect(page, n('fargate-3'), n('dynamodb-7'))
+    expect(await edgeCount(page)).toBe(7)
+
+    await page.getByRole('button', { name: /Simulate/ }).click()
+
+    // The outage phase kills an entire Region — the HUD and the Region box must
+    // both say so. Poll for them together: the phase lasts about four seconds,
+    // so asserting one after the other races the simulation.
+    await Promise.all([
+      expect(page.getByText('REGION OUTAGE')).toBeVisible({ timeout: 45_000 }),
+      expect(page.getByText(/— DARK/)).toBeVisible({ timeout: 45_000 }),
+    ])
+
+    await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
+    await expect(page.getByText('survive the Region failure (≥95%)')).toBeVisible()
+    await expect(page.getByText('✓ $113/mo')).toBeVisible()
   })
 
   test('the run timeline expands and closes', async ({ page }) => {

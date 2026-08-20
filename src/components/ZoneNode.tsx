@@ -1,9 +1,13 @@
 import { memo } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { useGameStore, type AzId } from '../store'
+import { useGameStore, type AzId, type RegionId } from '../store'
 
 export type VpcNodeType = Node<{ w: number; h: number }, 'vpc'>
 export type AzNodeType = Node<{ az: AzId; w: number; h: number }, 'az'>
+export type RegionNodeType = Node<
+  { region: RegionId; name: string; flag: string; w: number; h: number },
+  'region'
+>
 
 function VpcNodeInner({ data }: NodeProps<VpcNodeType>) {
   return (
@@ -48,3 +52,34 @@ function AzNodeInner({ data }: NodeProps<AzNodeType>) {
 }
 
 export const AzNode = memo(AzNodeInner)
+
+function RegionNodeInner({ data }: NodeProps<RegionNodeType>) {
+  const struckRegion = useGameStore((s) => s.struckRegion)
+  const runPhase = useGameStore((s) => s.runPhase)
+  const phase = useGameStore((s) => s.phase)
+
+  const isDown = phase === 'run' && runPhase === 'outage' && struckRegion === data.region
+
+  return (
+    <div
+      style={{ width: data.w, height: data.h }}
+      className={`pointer-events-none rounded-2xl border-2 border-dashed transition-colors duration-300 ${
+        isDown
+          ? 'animate-pulse border-red-500/80 bg-red-500/10'
+          : 'border-violet-500/40 bg-violet-500/[0.03]'
+      }`}
+    >
+      <div
+        className={`absolute -top-3 left-4 rounded-md border bg-slate-950 px-2 py-0.5 text-[10px] font-bold tracking-wide ${
+          isDown ? 'border-red-500/60 text-red-300' : 'border-violet-500/40 text-violet-300'
+        }`}
+      >
+        {isDown ? '🌑 ' : `${data.flag} `}
+        Region · {data.name}
+        {isDown && ' — DARK'}
+      </div>
+    </div>
+  )
+}
+
+export const RegionNode = memo(RegionNodeInner)

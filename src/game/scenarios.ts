@@ -4,6 +4,7 @@ export type TrackId =
   | 'genai'
   | 'event-driven'
   | 'streaming'
+  | 'global'
   | 'custom'
 
 export interface Track {
@@ -45,6 +46,12 @@ export const TRACKS: Track[] = [
     description: 'High-volume ingest and real-time AI scoring on the stream.',
   },
   {
+    id: 'global',
+    name: 'Going Global',
+    emoji: '🌍',
+    description: 'The last exam: an entire Region goes dark and the app stays up.',
+  },
+  {
     id: 'custom',
     name: 'My Scenarios',
     emoji: '🛠️',
@@ -74,7 +81,13 @@ export interface Scenario {
   budget: number
   /** Show the VPC + Availability Zone boxes; zonal services must be placed in an AZ. */
   hasVpc?: boolean
-  /** After the spike, one Availability Zone fails. */
+  /**
+   * Zoom out one level: the canvas shows two Region boxes instead of AZs, every
+   * service except DNS and the CDN must be placed inside one, and the outage
+   * takes a whole Region — zonal or not. Mutually exclusive with hasVpc.
+   */
+  multiRegion?: boolean
+  /** After the spike, one Availability Zone (or, with multiRegion, one Region) fails. */
   hasOutage?: boolean
   /** Attackers scan the design for internet-exposed resources mid-run. */
   hasProbe?: boolean
@@ -329,6 +342,33 @@ export const SCENARIOS: Scenario[] = [
       'API Gateway charges per request. At 500 RPS sustained, that alone is $50/mo — do the math against your budget.',
       'Kinesis is a durable, IAM-authenticated front door built exactly for this: high-volume ingest at a flat price.',
       'The pipeline: Kinesis → Lambda consumers → SageMaker endpoint for scoring.',
+    ],
+  },
+  // ---------------------------------------------------------- Going Global
+  {
+    id: 'blackout',
+    track: 'global',
+    order: 1,
+    difficulty: 3,
+    title: 'The Blackout',
+    emoji: '🌑',
+    hook: 'us-east-1 goes dark. Your app does not.',
+    brief:
+      'Your product is global now, and the board spent last month’s outage watching half the internet fall over with us-east-1 — including you. The new mandate is blunt: survive the loss of an entire Region, live, in front of them. Zoom out. One Region is no longer an architecture; it is a single point of failure with a lot of Availability Zones in it.',
+    need: 'app',
+    baselineRps: 400,
+    spikeRps: 1200,
+    spikeLabel: '🌍 Every timezone awake at once!',
+    budget: 160,
+    hasProbe: true,
+    multiRegion: true,
+    hasOutage: true,
+    outageLabel: '🌑 An entire Region has gone dark!',
+    requiredServices: ['route53'],
+    goalHints: [
+      'Everything except DNS and the CDN edge lives inside one Region — and dies with it. Each Region needs its own complete stack.',
+      'Pointing Users straight at both Regions does not work: DNS clients do not health-check, so half your traffic keeps walking into the dead one. Route 53 does health-check.',
+      'The survivor absorbs 100% of the load, so both Regions must be sized for the whole thing. Two idle fixed-size stacks will double your bill — this is what elasticity is actually for.',
     ],
   },
 ]

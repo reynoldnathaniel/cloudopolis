@@ -13,6 +13,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '../store'
 import {
   PHASE_META,
+  phaseLabel,
   areaPath,
   bandsOf,
   buildScales,
@@ -40,6 +41,7 @@ const GRID = [0, 0.25, 0.5, 0.75, 1]
 export function RunTimelineExpanded({ onClose }: { onClose: () => void }) {
   const history = useGameStore((s) => s.runHistory)
   const scenario = useGameStore((s) => s.scenario())
+  const multiRegion = scenario.multiRegion === true
   const [hover, setHover] = useState<number | null>(null)
   const [hidden, setHidden] = useState<Set<SeriesKey>>(new Set())
 
@@ -142,7 +144,7 @@ export function RunTimelineExpanded({ onClose }: { onClose: () => void }) {
                     )}
                     {x1 - x0 > 52 && (
                       <text x={(x0 + x1) / 2} y={PAD.top - 12} textAnchor="middle" fontSize="11" fill="#94a3b8">
-                        {PHASE_META[b.phase].label}
+                        {phaseLabel(b.phase, multiRegion)}
                       </text>
                     )}
                   </g>
@@ -259,7 +261,7 @@ export function RunTimelineExpanded({ onClose }: { onClose: () => void }) {
                 style={{ left: `${tooltipLeft}%`, transform: flip ? 'translateX(-108%)' : 'translateX(8%)' }}
               >
                 <div className="mb-1 flex items-baseline justify-between border-b border-slate-800 pb-1">
-                  <span className="text-[10px] font-semibold text-slate-300">{PHASE_META[point.phase].label}</span>
+                  <span className="text-[10px] font-semibold text-slate-300">{phaseLabel(point.phase, multiRegion)}</span>
                   <span className="text-[10px] tabular-nums text-slate-500">{formatSeconds(secondsAt(at))}</span>
                 </div>
                 {defs

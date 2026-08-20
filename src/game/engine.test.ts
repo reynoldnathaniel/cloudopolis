@@ -673,3 +673,152 @@ describe('Streaming: Click Stream (click-stream)', () => {
     expect(securityAudit(qNodes, [E('users', 'q')])).toHaveLength(1)
   })
 })
+
+// ------------------------------------------------- Going Global: The Blackout
+//
+// The engine has no concept of a Region — the store decides which nodes a Region
+// failure kills and hands them over as `dead`. So these tests kill a whole
+// region's worth of nodes at once, which is exactly what the store does.
+
+describe('Going Global: The Blackout (blackout)', () => {
+  const sc = getScenario('blackout')
+  const USE1 = ['alb1', 'fg1', 'db1']
+
+  // Active-active: Route 53 out front, a complete stack in each Region.
+  const nodes = [
+    N('users', 'users'),
+    N('r53', 'route53'),
+    N('alb1', 'alb'),
+    N('fg1', 'fargate'),
+    N('db1', 'dynamodb'),
+    N('alb2', 'alb'),
+    N('fg2', 'fargate'),
+    N('db2', 'dynamodb'),
+  ]
+  const edges = [
+    E('users', 'r53'),
+    E('r53', 'alb1'),
+    E('alb1', 'fg1'),
+    E('fg1', 'db1'),
+    E('r53', 'alb2'),
+    E('alb2', 'fg2'),
+    E('fg2', 'db2'),
+  ]
+
+  it('active-active behind Route 53 survives losing a whole Region, at $113/mo', () => {
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    expect(rate(steady(nodes, edges, sc.spikeRps, sc.id).stats)).toBeGreaterThan(0.99)
+    // us-east-1 goes dark: the survivor absorbs 100% of the load.
+    expect(rate(steady(nodes, edges, sc.baselineRps, sc.id, USE1).stats)).toBeGreaterThan(0.99)
+
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(113)
+    expect(cost).toBeLessThanOrEqual(sc.budget)
+    expect(securityAudit(nodes, edges)).toHaveLength(0)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.nodeLoads)).toHaveLength(0)
+  })
+
+  it('the all-serverless stack also fits the budget — two valid answers', () => {
+    const svl = [
+      N('users', 'users'),
+      N('r53', 'route53'),
+      N('gw1', 'apigw'),
+      N('fn1', 'lambda'),
+      N('db1', 'dynamodb'),
+      N('gw2', 'apigw'),
+      N('fn2', 'lambda'),
+      N('db2', 'dynamodb'),
+    ]
+    const svlEdges = [
+      E('users', 'r53'),
+      E('r53', 'gw1'),
+      E('gw1', 'fn1'),
+      E('fn1', 'db1'),
+      E('r53', 'gw2'),
+      E('gw2', 'fn2'),
+      E('fn2', 'db2'),
+    ]
+    const base = steady(svl, svlEdges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    expect(rate(steady(svl, svlEdges, sc.baselineRps, sc.id, ['gw1', 'fn1', 'db1']).stats)).toBeGreaterThan(0.99)
+    expect(estimateMonthlyCost(svl, base.nodeLoads)).toBeLessThanOrEqual(sc.budget)
+  })
+
+  // The whole point of the level: DNS clients believe what they are told.
+  it('pointing Users at both Regions loses half the traffic — Route 53 does not', () => {
+    const direct = nodes.filter((n) => n.id !== 'r53')
+    const directEdges = [
+      E('users', 'alb1'),
+      E('alb1', 'fg1'),
+      E('fg1', 'db1'),
+      E('users', 'alb2'),
+      E('alb2', 'fg2'),
+      E('fg2', 'db2'),
+    ]
+    // Healthy, it looks identical to the Route 53 design.
+    expect(rate(steady(direct, directEdges, sc.baselineRps, sc.id).stats)).toBeGreaterThan(0.99)
+    // Under a Region failure it walks half of every request into the dead one.
+    const out = steady(direct, directEdges, sc.baselineRps, sc.id, USE1).stats
+    expect(rate(out)).toBeGreaterThan(0.45)
+    expect(rate(out)).toBeLessThan(0.55)
+    expect(out.issues).toContain('hit-dead-node')
+    // ...and it never earns the second star, which needs ≥95%.
+    expect(rate(out)).toBeLessThan(0.95)
+  })
+
+  it('a single-Region design serves nothing once that Region is gone', () => {
+    const one = [N('users', 'users'), N('r53', 'route53'), N('alb1', 'alb'), N('fg1', 'fargate'), N('db1', 'dynamodb')]
+    const oneEdges = [E('users', 'r53'), E('r53', 'alb1'), E('alb1', 'fg1'), E('fg1', 'db1')]
+    expect(rate(steady(one, oneEdges, sc.baselineRps, sc.id).stats)).toBeGreaterThan(0.99)
+    const out = steady(one, oneEdges, sc.baselineRps, sc.id, USE1).stats
+    expect(rate(out)).toBe(0)
+    expect(out.issues).toContain('all-targets-dead')
+  })
+
+  it('two fixed-size EC2 + RDS stacks survive but blow the budget — why elasticity exists', () => {
+    const vms = [
+      N('users', 'users'),
+      N('r53', 'route53'),
+      N('alb1', 'alb'),
+      N('ec2a', 'ec2'),
+      N('ec2b', 'ec2'),
+      N('db1', 'rds'),
+      N('alb2', 'alb'),
+      N('ec2c', 'ec2'),
+      N('ec2d', 'ec2'),
+      N('db2', 'rds'),
+    ]
+    const vmEdges = [
+      E('users', 'r53'),
+      E('r53', 'alb1'),
+      E('alb1', 'ec2a'),
+      E('alb1', 'ec2b'),
+      E('ec2a', 'db1'),
+      E('ec2b', 'db1'),
+      E('r53', 'alb2'),
+      E('alb2', 'ec2c'),
+      E('alb2', 'ec2d'),
+      E('ec2c', 'db2'),
+      E('ec2d', 'db2'),
+    ]
+    const base = steady(vms, vmEdges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    expect(estimateMonthlyCost(vms, base.nodeLoads)).toBeGreaterThan(sc.budget)
+  })
+
+  it('regional services left outside a Region box report needs-region, not needs-az', () => {
+    const stray = [N('users', 'users'), N('r53', 'route53'), N('alb1', 'alb')]
+    stray[2] = { ...stray[2], unplaced: true }
+    const stats = simulateTick(stray, [E('users', 'r53'), E('r53', 'alb1')], sc.baselineRps, sc)
+    expect(stats.issues).toContain('needs-region')
+    expect(stats.issues).not.toContain('needs-az')
+  })
+
+  it('Route 53 is edge-safe and global', () => {
+    expect(securityAudit([N('users', 'users'), N('r53', 'route53')], [E('users', 'r53')])).toHaveLength(0)
+    expect(SERVICES.route53.global).toBe(true)
+    expect(SERVICES.cloudfront.global).toBe(true)
+    expect(SERVICES.alb.global).toBeUndefined()
+  })
+})

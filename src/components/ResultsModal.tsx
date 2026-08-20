@@ -129,8 +129,12 @@ export function ResultsModal() {
                   />
                   {results.outageSuccess !== null && (
                     <Pillar
-                      label="💥 Fault tolerance"
-                      target="survive the AZ outage (≥95%)"
+                      label={scenario.multiRegion ? '🌑 Fault tolerance' : '💥 Fault tolerance'}
+                      target={
+                        scenario.multiRegion
+                          ? 'survive the Region failure (≥95%)'
+                          : 'survive the AZ outage (≥95%)'
+                      }
                       value={`${Math.round(results.outageSuccess * 100)}%`}
                       pass={results.outageSuccess >= 0.95}
                     />

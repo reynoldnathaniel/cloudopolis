@@ -43,6 +43,12 @@ export interface ServiceDef {
   /** Zonal services live in one Availability Zone and die with it (EC2, RDS, ElastiCache) */
   zonal: boolean
   /**
+   * Global services live outside any one Region — DNS and the CDN edge network.
+   * In multi-region scenarios everything else must be placed inside a Region box
+   * and dies when that Region does; these survive.
+   */
+  global?: boolean
+  /**
    * Elastic fleets (Auto Scaling groups, Fargate services): capacity is
    * `units × perUnit`, and the fleet steps toward demand at `rate` units per
    * tick rather than arriving instantly. The rate is the whole personality —
@@ -90,7 +96,25 @@ export const SERVICES: Record<string, ServiceDef> = {
     capacity: Infinity,
     autoScales: true,
     zonal: false,
+    global: true,
     blurb: 'Traffic starts here. Connect Users to your entry point.',
+  },
+  route53: {
+    id: 'route53',
+    name: 'Route 53',
+    fullName: 'Amazon Route 53 (DNS + health checks)',
+    abbr: 'R53',
+    category: 'network',
+    role: 'router',
+    monthlyCost: 5,
+    costPerRps: 0,
+    capacity: 1000000,
+    autoScales: true,
+    zonal: false,
+    global: true,
+    edgeSafe: true,
+    blurb:
+      'Global DNS with health checks. It watches every endpoint behind it and stops answering with the ones that are down — so a whole Region can fail and users still land somewhere alive.',
   },
   cloudfront: {
     id: 'cloudfront',
@@ -104,6 +128,7 @@ export const SERVICES: Record<string, ServiceDef> = {
     capacity: 100000,
     autoScales: true,
     zonal: false,
+    global: true,
     edgeSafe: true,
     blurb: 'Caches content at the edge. Serves ~80% of static traffic without touching your origin.',
   },
@@ -357,7 +382,7 @@ export interface PaletteGroup {
 
 /** Palette, grouped for display (everything except the Users node) */
 export const PALETTE_GROUPS: PaletteGroup[] = [
-  { label: 'Edge & Network', items: [SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
+  { label: 'Edge & Network', items: [SERVICES.route53, SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
   { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda] },
   { label: 'Data', items: [SERVICES.s3, SERVICES.rds, SERVICES.dynamodb, SERVICES.elasticache] },
   { label: 'Messaging & Streaming', items: [SERVICES.sqs, SERVICES.sns, SERVICES.kinesis] },

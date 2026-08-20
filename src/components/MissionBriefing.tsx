@@ -89,7 +89,13 @@ export function MissionBriefing() {
                     and the backlog must drain by run end
                   </MissionLine>
                 )}
-                {scenario.hasOutage && (
+                {scenario.hasOutage && scenario.multiRegion && (
+                  <MissionLine icon="🌑">
+                    Survive the loss of an entire <b className="text-fuchsia-300">AWS Region</b> —
+                    everything inside it dies, and only DNS and the CDN edge live outside one
+                  </MissionLine>
+                )}
+                {scenario.hasOutage && !scenario.multiRegion && (
                   <MissionLine icon="💥">
                     Survive a full <b className="text-fuchsia-300">Availability Zone failure</b> —
                     everything zonal dies with its AZ

@@ -2,9 +2,9 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { SERVICES, CATEGORY_COLORS } from '../game/services'
 import { ICONS } from '../game/icons'
-import { useGameStore, type AzId } from '../store'
+import { useGameStore, type AzId, type RegionId } from '../store'
 
-export type ServiceNodeType = Node<{ serviceId: string; az?: AzId }, 'service'>
+export type ServiceNodeType = Node<{ serviceId: string; az?: AzId; region?: RegionId }, 'service'>
 
 function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
   const def = SERVICES[data.serviceId]
@@ -13,6 +13,7 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
   const isDead = useGameStore((s) => s.deadNodeIds.includes(id))
   const isBreached = useGameStore((s) => s.breachedNodeIds.includes(id))
   const hasVpc = useGameStore((s) => s.scenario().hasVpc === true)
+  const multiRegion = useGameStore((s) => s.scenario().multiRegion === true)
   const color = CATEGORY_COLORS[def.category]
   const icon = ICONS[def.id]
 
@@ -20,7 +21,7 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
   const fleet = def.scaling
   const isAsg = fleet !== undefined
   const instances = stats?.instances ?? fleet?.min ?? 2
-  const unplaced = hasVpc && def.zonal && !data.az
+  const unplaced = multiRegion ? def.global !== true && !data.region : hasVpc && def.zonal && !data.az
   const util = stats?.util ?? 0
   const overloaded = !isDead && util > 1
   const utilPct = Math.min(100, Math.round(util * 100))
@@ -69,7 +70,7 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
       )}
       {!isDead && !isBreached && unplaced && (
         <div className="absolute -right-2 -top-2 z-10 rounded-full bg-amber-500 px-1.5 py-0.5 text-[8px] font-bold text-slate-950 shadow">
-          ⚠ needs AZ
+          ⚠ needs {multiRegion ? 'Region' : 'AZ'}
         </div>
       )}
 
@@ -153,7 +154,7 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
       )}
       {running && isDead && (
         <div className="px-2.5 pb-2 text-center text-[9px] font-bold uppercase tracking-widest text-red-400">
-          zone down
+          {multiRegion ? 'region down' : 'zone down'}
         </div>
       )}
     </div>

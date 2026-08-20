@@ -16,9 +16,13 @@ export interface LiteNode {
   serviceId: string
   /** Which Availability Zone this node lives in (zonal services only) */
   az?: 'a' | 'b' | null
-  /** Killed by the AZ outage this tick */
+  /** Killed by the AZ (or, in multi-region scenarios, Region) outage this tick */
   dead?: boolean
-  /** Zonal service not placed in any AZ (invalid in VPC levels) */
+  /**
+   * Placed in no container it requires — a zonal service outside every AZ box,
+   * or, in multi-region scenarios, any regional service outside every Region box.
+   * The caller decides; the engine just refuses to run it.
+   */
   unplaced?: boolean
 }
 
@@ -142,8 +146,10 @@ export function simulateTick(
     return SERVICES[n.serviceId].capacity
   }
 
+  // Same "you didn't put it anywhere" failure, one level of the hierarchy apart.
+  const placementIssue = scenario.multiRegion === true ? 'needs-region' : 'needs-az'
   for (const n of nodes) {
-    if (n.unplaced) issues.add('needs-az')
+    if (n.unplaced) issues.add(placementIssue)
   }
 
   const queue: string[] = nodes.filter((n) => (indeg.get(n.id) ?? 0) === 0).map((n) => n.id)
@@ -175,7 +181,7 @@ export function simulateTick(
     if (isOffline(id)) {
       if (L > 1) {
         dropped += L
-        issues.add(node.dead ? 'hit-dead-node' : 'needs-az')
+        issues.add(node.dead ? 'hit-dead-node' : placementIssue)
       }
       nodeLoads[id] = { inRps: L, processed: 0, capacity: def.capacity, util: 0 }
       for (const e of outs) {
@@ -577,6 +583,8 @@ export const ISSUE_TIPS: Record<string, string> = {
   'retriever-no-model':
     'Retrieval without generation answers nothing. A vector store grounds the request — connect it onward to the model that writes the answer.',
   'needs-az': 'Zonal services (EC2, RDS, ElastiCache) must be placed inside an Availability Zone box.',
+  'needs-region':
+    'Almost everything in AWS is regional. Drag it inside a Region box — only DNS and the CDN edge live outside one.',
   'hit-dead-node': 'Traffic was sent straight to resources in the failed AZ and was lost. A load balancer health-checks and routes around zone failures.',
   'db-unavailable': 'Everything your app tier depends on lived in the failed AZ. Keep a standby (database, cache) in a second zone.',
   'all-targets-dead': 'Everything behind your router lived in the failed AZ. Spread instances across both zones.',
@@ -596,7 +604,23 @@ const OVERLOAD_TIPS: Record<string, string> = {
     'Your SageMaker endpoint saturated at 2,000 predictions/s. Provisioned inference has a hard ceiling.',
 }
 
-export function tipsForIssues(issues: string[]): string[] {
+/**
+ * The same failures, retold one level up. A design that loses traffic to a dead
+ * AZ and one that loses traffic to a dead Region break for identical reasons,
+ * but "spread instances across both zones" is useless advice when the thing that
+ * died was ap-northeast-2.
+ */
+const REGION_TIPS: Record<string, string> = {
+  'hit-dead-node':
+    'Traffic went straight into the failed Region and was lost. Users resolve DNS once and believe it — they never health-check. Route 53 does: put it in front so DNS stops handing out the dead endpoint.',
+  'db-unavailable':
+    'Everything your app tier depends on lived in the failed Region. A standby Region needs its own data, not a pointer to someone else’s.',
+  'all-targets-dead':
+    'Everything behind your entry point lived in the failed Region. Each Region needs a complete stack — router, compute, and data — and Route 53 choosing between them.',
+}
+
+export function tipsForIssues(issues: string[], opts?: { multiRegion?: boolean }): string[] {
+  const base = opts?.multiRegion === true ? { ...ISSUE_TIPS, ...REGION_TIPS } : ISSUE_TIPS
   const tips: string[] = []
   for (const issue of issues) {
     if (issue.startsWith('overloaded:')) {
@@ -611,8 +635,8 @@ export function tipsForIssues(issues: string[]): string[] {
             ? `${name} saturated while the fleet was still scaling up — ${def.scaling.unitLabel} take time to start. Raising the minimum absorbs sharper spikes.`
             : `${name} hit 100% utilization and started dropping requests. Add more instances, or switch to a service that auto-scales.`),
       )
-    } else if (ISSUE_TIPS[issue]) {
-      tips.push(ISSUE_TIPS[issue])
+    } else if (base[issue]) {
+      tips.push(base[issue])
     }
   }
   return [...new Set(tips)]

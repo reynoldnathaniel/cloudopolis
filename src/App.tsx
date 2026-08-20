@@ -13,9 +13,9 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useGameStore, AZ_RECTS, type AzId } from './store'
+import { useGameStore, AZ_RECTS, REGIONS, REGION_RECTS, type AzId, type RegionId } from './store'
 import { ServiceNode, UsersNode } from './components/ServiceNode'
-import { VpcNode, AzNode } from './components/ZoneNode'
+import { VpcNode, AzNode, RegionNode } from './components/ZoneNode'
 import { TrafficEdge } from './components/TrafficEdge'
 import { Palette } from './components/Palette'
 import { ScenarioPanel } from './components/ScenarioPanel'
@@ -31,7 +31,7 @@ import { CATEGORY_COLORS, SERVICES } from './game/services'
 import { exportCanvasPng } from './game/exportImage'
 import { SANDBOX_ID } from './game/scenarios'
 
-const nodeTypes = { service: ServiceNode, users: UsersNode, vpc: VpcNode, az: AzNode }
+const nodeTypes = { service: ServiceNode, users: UsersNode, vpc: VpcNode, az: AzNode, region: RegionNode }
 const edgeTypes = { traffic: TrafficEdge }
 
 const NODE_W = 150
@@ -42,6 +42,15 @@ function azAtPoint(x: number, y: number): AzId | null {
   for (const az of ['a', 'b'] as AzId[]) {
     const r = AZ_RECTS[az]
     if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return az
+  }
+  return null
+}
+
+/** Which Region box contains this absolute canvas point (node center)? */
+function regionAtPoint(x: number, y: number): RegionId | null {
+  for (const { id } of REGIONS) {
+    const r = REGION_RECTS[id]
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return id
   }
   return null
 }
@@ -62,8 +71,10 @@ function Canvas() {
   const onConnect = useGameStore((s) => s.onConnect)
   const addServiceNode = useGameStore((s) => s.addServiceNode)
   const assignZone = useGameStore((s) => s.assignZone)
+  const assignRegion = useGameStore((s) => s.assignRegion)
   const editing = useGameStore((s) => s.phase === 'edit')
   const hasVpc = useGameStore((s) => s.scenario().hasVpc === true)
+  const multiRegion = useGameStore((s) => s.scenario().multiRegion === true)
   const scenarioTitle = useGameStore((s) => s.scenario().title)
   const tutorialActive = useGameStore((s) => s.tutorialStep !== null)
   const sandboxTourActive = useGameStore((s) => s.sandboxTutorialStep !== null)
@@ -76,13 +87,22 @@ function Canvas() {
       if (!serviceId) return
       const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       addServiceNode(serviceId, { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 }, true)
-      // addServiceNode auto-places zonal services into an AZ in VPC levels; if the
-      // user dropped one at a specific point, honor that point when it lands in a box.
-      if (hasVpc && SERVICES[serviceId]?.zonal) {
+      const latest = useGameStore.getState().nodes
+      const added = latest[latest.length - 1]
+      if (!added) return
+      // addServiceNode auto-places into a box; if the user dropped at a specific
+      // point, honor that point when it lands inside one.
+      if (multiRegion && SERVICES[serviceId]?.global !== true) {
+        const region = regionAtPoint(pos.x, pos.y)
+        if (region) {
+          assignRegion(added.id, region, {
+            x: pos.x - REGION_RECTS[region].x - NODE_W / 2,
+            y: pos.y - REGION_RECTS[region].y - NODE_H / 2,
+          })
+        }
+      } else if (hasVpc && SERVICES[serviceId]?.zonal) {
         const az = azAtPoint(pos.x, pos.y)
-        const latest = useGameStore.getState().nodes
-        const added = latest[latest.length - 1]
-        if (added && az) {
+        if (az) {
           assignZone(added.id, az, {
             x: pos.x - AZ_RECTS[az].x - NODE_W / 2,
             y: pos.y - AZ_RECTS[az].y - NODE_H / 2,
@@ -90,19 +110,37 @@ function Canvas() {
         }
       }
     },
-    [screenToFlowPosition, addServiceNode, assignZone, hasVpc],
+    [screenToFlowPosition, addServiceNode, assignZone, assignRegion, hasVpc, multiRegion],
   )
 
-  // Re-parent zonal services into/out of AZ boxes when dragging ends.
+  // Re-parent services into/out of their container box when dragging ends —
+  // AZ boxes in VPC levels, Region boxes in the multi-region finale.
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_e, node) => {
-      if (!hasVpc || node.type !== 'service') return
+      if (node.type !== 'service') return
       const def = SERVICES[(node.data as { serviceId?: string }).serviceId ?? '']
-      if (!def?.zonal) return
+      if (!def) return
       const internal = getInternalNode(node.id)
       const abs = internal?.internals.positionAbsolute ?? node.position
       const cx = abs.x + NODE_W / 2
       const cy = abs.y + NODE_H / 2
+
+      if (multiRegion) {
+        if (def.global === true) return
+        const region = regionAtPoint(cx, cy)
+        const current = ((node.data as { region?: RegionId }).region ?? null) as RegionId | null
+        if (region === current) return
+        assignRegion(
+          node.id,
+          region,
+          region
+            ? { x: abs.x - REGION_RECTS[region].x, y: abs.y - REGION_RECTS[region].y }
+            : { x: abs.x, y: abs.y },
+        )
+        return
+      }
+
+      if (!hasVpc || !def.zonal) return
       const az = azAtPoint(cx, cy)
       const currentAz = ((node.data as { az?: AzId }).az ?? null) as AzId | null
       if (az === currentAz) return
@@ -111,7 +149,7 @@ function Canvas() {
         : { x: abs.x, y: abs.y }
       assignZone(node.id, az, position)
     },
-    [hasVpc, getInternalNode, assignZone],
+    [hasVpc, multiRegion, getInternalNode, assignZone, assignRegion],
   )
 
   const isValidConnection: IsValidConnection = useCallback(
@@ -167,6 +205,7 @@ function Canvas() {
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-500 backdrop-blur">
           Drag services in · drag from a node&apos;s right dot to another&apos;s left dot to connect · select + ⌫ to delete
           {hasVpc ? ' · zonal services live inside an AZ box' : ''}
+          {multiRegion ? ' · everything but DNS and the CDN lives inside a Region box' : ''}
         </div>
       )}
     </div>

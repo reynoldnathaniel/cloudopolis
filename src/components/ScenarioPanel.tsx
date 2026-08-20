@@ -77,7 +77,11 @@ export function ScenarioPanel() {
           </Chip>
           <Chip tone="text-emerald-300">💰 ≤ ${scenario.budget}/mo</Chip>
           {scenario.async && <Chip tone="text-indigo-300">⏳ async · zero loss</Chip>}
-          {scenario.hasOutage && <Chip tone="text-fuchsia-300">💥 AZ outage</Chip>}
+          {scenario.hasOutage && (
+            <Chip tone="text-fuchsia-300">
+              {scenario.multiRegion ? '🌑 Region outage' : '💥 AZ outage'}
+            </Chip>
+          )}
           {scenario.hasProbe && <Chip tone="text-amber-300">🕵️ probe</Chip>}
         </div>
 
