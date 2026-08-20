@@ -64,7 +64,7 @@ style you want to learn.
 | Track | Scenarios | The lesson |
 | --- | --- | --- |
 | ☁️ **Foundations** | Launch Day · PhotoShare · The Migration · FlashSale · IPO Day | CDN caching, load balancing, managed data stores, Multi-AZ redundancy, auto scaling |
-| 🤖 **GenAI** | Prompt Rush | Bedrock's throughput quota and token costs — beaten by a semantic cache in front of the model |
+| 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
 | 📨 **Event-Driven** | Order Storm | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing |
 | 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
@@ -82,6 +82,10 @@ style you want to learn.
   ALB, and API Gateway belong on the internet edge.
 - **EC2 Auto Scaling groups** — an elastic 2–10 instance fleet that scales with observed load,
   *with realistic boot lag*, so sharp spikes hurt before capacity catches up.
+- **Retrieve-then-generate chains** — a vector store (OpenSearch) is a *mid-chain* stage: it
+  grounds a request and forwards all of it onward, answering nothing itself. A request counts
+  as served only once it completes the whole chain, so RAG is visible on the canvas as
+  `cache → retriever → model`.
 - **Async pipelines** — SQS/Kinesis nodes hold a live backlog that drains at consumer capacity;
   SNS fans out a copy per subscriber. Async scenarios are scored on **Delivery / Durability /
   Drain** instead of instant service.

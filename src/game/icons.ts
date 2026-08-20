@@ -18,6 +18,8 @@ import kinesis from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_
 import sagemaker from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Machine-Learning/64/Arch_Amazon-SageMaker_64.svg'
 // Bedrock postdates the 2021 asset pack — its official icon comes from aws-icons.
 import bedrock from 'aws-icons/icons/architecture-service/AmazonBedrock.svg'
+// Likewise OpenSearch, which was still called Elasticsearch Service in 2021.
+import opensearch from 'aws-icons/icons/architecture-service/AmazonOpenSearchService.svg'
 
 export const ICONS: Record<string, string> = {
   ec2,
@@ -36,4 +38,5 @@ export const ICONS: Record<string, string> = {
   kinesis,
   sagemaker,
   bedrock,
+  opensearch,
 }

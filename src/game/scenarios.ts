@@ -222,6 +222,29 @@ export const SCENARIOS: Scenario[] = [
       'Cached answers also cost zero tokens. One cache fixes the quota AND the bill.',
     ],
   },
+  {
+    id: 'rag-grounded',
+    track: 'genai',
+    order: 2,
+    difficulty: 3,
+    title: 'Grounded',
+    emoji: '📚',
+    hook: 'Your chatbot cited a case that does not exist.',
+    brief:
+      'Your legal-tech client just found a citation in your bot’s answer to a court case that was never filed. New rule from their counsel: every answer must be grounded in their own document corpus. That means retrieve first, then generate — every single request now makes two hops before anyone gets an answer.',
+    need: 'app',
+    baselineRps: 150,
+    spikeRps: 450,
+    spikeLabel: '📚 Monday morning — the whole firm logs on!',
+    budget: 175,
+    hasProbe: true,
+    requiredServices: ['opensearch', 'bedrock'],
+    goalHints: [
+      'Retrieval grounds a request; it never answers one. OpenSearch must hand off to the model behind it.',
+      'Every request that reaches the model costs tokens and eats the 150 RPS quota — and the spike is 450.',
+      'A semantic cache in front of the chain answers repeats outright. Only the misses need retrieving and generating.',
+    ],
+  },
   // ---------------------------------------------------------- Event-Driven
   {
     id: 'order-storm',

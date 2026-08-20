@@ -334,7 +334,7 @@ export function simulateTick(
             const t = nodeById.get(e.target)
             if (!t) return false
             const r = SERVICES[t.serviceId].role
-            return r === 'db' || r === 'cache'
+            return r === 'db' || r === 'cache' || r === 'retriever'
           })
           const healthyApp = appTargets.filter((e) => !isOffline(e.target))
           if (p > 0) {
@@ -371,7 +371,9 @@ export function simulateTick(
           const misses = p * (1 - CACHE_HIT_RATIO)
           const dbTargets = outs.filter((e) => {
             const t = nodeById.get(e.target)
-            return t !== undefined && SERVICES[t.serviceId].role === 'db'
+            if (t === undefined) return false
+            const r = SERVICES[t.serviceId].role
+            return r === 'db' || r === 'retriever'
           })
           const healthyDb = dbTargets.filter((e) => !isOffline(e.target))
           if (dbTargets.length === 0) {
@@ -385,6 +387,45 @@ export function simulateTick(
           }
         }
         nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: legit / def.capacity, }
+        break
+      }
+      case 'retriever': {
+        // A pure mid-chain stage: it answers nothing itself, it *grounds* the
+        // request and hands the whole thing on. Retrieve-then-generate — the
+        // request only counts as served once the model behind it responds.
+        const legit = Math.min(appIn[id], L)
+        const direct = L - legit
+        if (direct > 1) {
+          dropped += direct
+          issues.add('db-direct-access')
+        }
+        const p = Math.min(legit, def.capacity)
+        const over = legit - p
+        dropped += over
+        if (over > 1) issues.add(`overloaded:${def.name}`)
+        if (p > 0) {
+          const modelTargets = outs.filter((e) => {
+            const t = nodeById.get(e.target)
+            return t !== undefined && SERVICES[t.serviceId].role === 'db'
+          })
+          const healthyModels = modelTargets.filter((e) => !isOffline(e.target))
+          if (modelTargets.length === 0) {
+            dropped += p
+            issues.add('retriever-no-model')
+          } else if (healthyModels.length === 0) {
+            dropped += p
+            issues.add('db-unavailable')
+          } else {
+            // Everything retrieved goes on to be generated — no hit ratio here.
+            forward(p, healthyModels, true)
+          }
+        }
+        nodeLoads[id] = {
+          inRps: L,
+          processed: p,
+          capacity: def.capacity,
+          util: legit / def.capacity,
+        }
         break
       }
       case 'db': {
@@ -497,7 +538,7 @@ export function securityAudit(nodes: LiteNode[], edges: LiteEdge[]): SecurityFin
         label: 'Public S3 bucket',
         tip: 'Your S3 bucket is open to the raw internet — the classic public-bucket mistake. Serve it through CloudFront (with Origin Access Control) and block public access.',
       })
-    } else if (def.role === 'db' || def.role === 'cache') {
+    } else if (def.role === 'db' || def.role === 'cache' || def.role === 'retriever') {
       findings.push({
         nodeId: target.id,
         label: `${def.name} exposed to the internet`,
@@ -530,6 +571,8 @@ export const ISSUE_TIPS: Record<string, string> = {
   'db-direct-access': 'Users cannot query a database or model directly. Put a compute tier (EC2 or Lambda) in front of it.',
   'cache-direct': 'A cache sits behind your compute tier, not in front of it. Route traffic compute → cache → database.',
   'cache-no-db': 'A cache needs somewhere to send its misses. Connect it onward to a database or model.',
+  'retriever-no-model':
+    'Retrieval without generation answers nothing. A vector store grounds the request — connect it onward to the model that writes the answer.',
   'needs-az': 'Zonal services (EC2, RDS, ElastiCache) must be placed inside an Availability Zone box.',
   'hit-dead-node': 'Traffic was sent straight to resources in the failed AZ and was lost. A load balancer health-checks and routes around zone failures.',
   'db-unavailable': 'Everything your app tier depends on lived in the failed AZ. Keep a standby (database, cache) in a second zone.',

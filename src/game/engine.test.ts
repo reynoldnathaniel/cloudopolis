@@ -426,6 +426,87 @@ describe('GenAI: Prompt Rush (prompt-rush)', () => {
 
 // ---------------------------------------------------------------- Event-Driven: Order Storm
 
+describe('GenAI: Grounded (rag-grounded)', () => {
+  const sc = getScenario('rag-grounded')
+
+  const CHAIN = {
+    nodes: [
+      N('users', 'users'),
+      N('gw', 'apigw'),
+      N('fn', 'lambda'),
+      N('cache', 'elasticache'),
+      N('vec', 'opensearch'),
+      N('llm', 'bedrock'),
+    ],
+    edges: [E('users', 'gw'), E('gw', 'fn'), E('fn', 'cache'), E('cache', 'vec'), E('vec', 'llm')],
+  }
+
+  it('retrieval alone answers nothing — the chain must reach a model', () => {
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('fn', 'lambda'), N('vec', 'opensearch')]
+    const edges = [E('users', 'gw'), E('gw', 'fn'), E('fn', 'vec')]
+    const s = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(s)).toBe(0)
+    expect(s.issues).toContain('retriever-no-model')
+  })
+
+  it('a retriever forwards everything it handles — no hit ratio of its own', () => {
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('fn', 'lambda'), N('vec', 'opensearch'), N('llm', 'bedrock')]
+    const edges = [E('users', 'gw'), E('gw', 'fn'), E('vec', 'llm'), E('fn', 'vec')]
+    const s = steady(nodes, edges, 100, sc.id).stats
+    // Every one of the 100 requests is retrieved, then generated.
+    expect(s.nodeLoads['vec'].processed).toBeCloseTo(100, 5)
+    expect(s.nodeLoads['llm'].processed).toBeCloseTo(100, 5)
+    expect(rate(s)).toBeGreaterThan(0.99)
+  })
+
+  it('ungrounded Lambda → Bedrock fails the blueprint', () => {
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('fn', 'lambda'), N('llm', 'bedrock')]
+    const edges = [E('users', 'gw'), E('gw', 'fn'), E('fn', 'llm')]
+    const s = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(blueprintMissing(sc.requiredServices, nodes, s.nodeLoads)).toContain('opensearch')
+  })
+
+  it('retrieve-then-generate without a cache blows both the quota and the budget', () => {
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('fn', 'lambda'), N('vec', 'opensearch'), N('llm', 'bedrock')]
+    const edges = [E('users', 'gw'), E('gw', 'fn'), E('fn', 'vec'), E('vec', 'llm')]
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    // Baseline squeaks through — 150 rps is exactly Bedrock's quota…
+    expect(rate(base)).toBeGreaterThan(0.99)
+    // …but every request pays tokens, so the bill alone loses the third star.
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(203)
+    expect(cost).toBeGreaterThan(sc.budget)
+    // And the spike sends all 450 at a 150 RPS quota.
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id).stats
+    expect(rate(spike)).toBeLessThan(0.5)
+    expect(spike.issues).toContain('overloaded:Bedrock')
+  })
+
+  it('semantic cache + retrieve-then-generate earns three stars at $165/mo', () => {
+    const { nodes, edges } = CHAIN
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id).stats
+    expect(rate(spike)).toBeGreaterThan(0.99)
+    // Only the cache misses are retrieved and generated: 450 × 30% = 135 ≤ 150 quota.
+    expect(spike.nodeLoads['vec'].processed).toBeCloseTo(135, 5)
+    expect(spike.nodeLoads['llm'].processed).toBeCloseTo(135, 5)
+
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(165)
+    expect(cost).toBeLessThanOrEqual(sc.budget)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.nodeLoads)).toHaveLength(0)
+    expect(securityAudit(nodes, edges)).toHaveLength(0)
+  })
+
+  it('a vector store on the public internet fails the probe', () => {
+    const nodes = [N('users', 'users'), N('vec', 'opensearch'), N('llm', 'bedrock')]
+    const edges = [E('users', 'vec'), E('vec', 'llm')]
+    expect(securityAudit(nodes, edges)).toHaveLength(1)
+  })
+})
+
 describe('Event-Driven: Order Storm (order-storm)', () => {
   const sc = getScenario('order-storm')
   const asyncNodes = [

@@ -22,6 +22,9 @@ export type Role =
   | 'cache'
   | 'queue'
   | 'fanout'
+  /** A mid-chain grounding stage: serves nothing itself, forwards everything
+   *  to the model behind it (retrieve-then-generate). */
+  | 'retriever'
 
 export interface ServiceDef {
   id: string
@@ -264,6 +267,21 @@ export const SERVICES: Record<string, ServiceDef> = {
     blurb:
       'Durable high-volume ingest at a flat price. IAM-authenticated, so producers can write straight to it. Throttles writes above 5,000 rec/s.',
   },
+  opensearch: {
+    id: 'opensearch',
+    name: 'OpenSearch',
+    fullName: 'Amazon OpenSearch Serverless (vector store)',
+    abbr: 'VEC',
+    category: 'ai',
+    role: 'retriever',
+    monthlyCost: 60,
+    costPerRps: 0,
+    capacity: 1000,
+    autoScales: false,
+    zonal: false,
+    blurb:
+      'A vector store for retrieval-augmented generation. It grounds a request in your own documents, then passes it on to the model — it never answers by itself.',
+  },
   bedrock: {
     id: 'bedrock',
     name: 'Bedrock',
@@ -307,7 +325,7 @@ export const PALETTE_GROUPS: PaletteGroup[] = [
   { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.lambda] },
   { label: 'Data', items: [SERVICES.s3, SERVICES.rds, SERVICES.dynamodb, SERVICES.elasticache] },
   { label: 'Messaging & Streaming', items: [SERVICES.sqs, SERVICES.sns, SERVICES.kinesis] },
-  { label: 'AI', items: [SERVICES.bedrock, SERVICES.sagemaker] },
+  { label: 'AI', items: [SERVICES.opensearch, SERVICES.bedrock, SERVICES.sagemaker] },
 ]
 
 /** Flat palette list (used by tests and drag-drop lookups) */
