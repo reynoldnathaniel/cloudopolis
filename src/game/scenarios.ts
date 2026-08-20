@@ -274,6 +274,35 @@ export const SCENARIOS: Scenario[] = [
   },
 ]
 
+/**
+ * Sandbox: not a mission and never listed in a track. It borrows the Scenario
+ * shape so the canvas, palette, engine, and HUD all work unchanged — but the
+ * run loop treats it specially (endless run, live traffic slider, chaos on
+ * demand) and nothing here is ever scored.
+ */
+export const SANDBOX_ID = 'sandbox'
+
+export const SANDBOX: Scenario = {
+  id: SANDBOX_ID,
+  track: 'foundations',
+  order: 0,
+  difficulty: 1,
+  title: 'Sandbox',
+  emoji: '🧪',
+  hook: 'No budget, no stars — just you, the canvas, and a traffic dial.',
+  brief:
+    'A blank region. Every service unlocked, no budget, no scoring. Drive the traffic yourself, kill an Availability Zone whenever you like, and run the security probe on demand. Build whatever you want and watch it behave.',
+  need: 'app',
+  baselineRps: 200,
+  spikeRps: 200,
+  spikeLabel: '',
+  // Cost is displayed but never scored; this ceiling just keeps the chart's
+  // budget reference line off the plot.
+  budget: Number.MAX_SAFE_INTEGER,
+  hasVpc: true,
+  goalHints: [],
+}
+
 // ---- custom scenarios (player-authored, registered at startup and on save) ----
 // The registry keeps this module pure data: customScenarios.ts owns persistence
 // and validation, and pushes the current list in here so every lookup below —
@@ -289,7 +318,7 @@ export const registerCustomScenarios = (list: Scenario[]): void => {
 const allScenarios = (): Scenario[] => (CUSTOM.length ? [...SCENARIOS, ...CUSTOM] : SCENARIOS)
 
 export const getScenario = (id: string): Scenario =>
-  allScenarios().find((s) => s.id === id) ?? SCENARIOS[0]
+  id === SANDBOX_ID ? SANDBOX : (allScenarios().find((s) => s.id === id) ?? SCENARIOS[0])
 
 export const scenariosInTrack = (track: TrackId): Scenario[] =>
   allScenarios()

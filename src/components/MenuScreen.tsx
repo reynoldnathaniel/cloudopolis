@@ -10,6 +10,7 @@ export function MenuScreen() {
   const continueGame = useGameStore((s) => s.continueGame)
   const openSelect = useGameStore((s) => s.openSelect)
   const bestStars = useGameStore((s) => s.bestStars)
+  const openSandbox = useGameStore((s) => s.openSandbox)
   const tutorialDone = useGameStore((s) => s.tutorialDone)
   const hasProgress = useGameStore(
     (s) => s.nodes.some((n) => n.type === 'service') || s.edges.length > 0,
@@ -76,6 +77,12 @@ export function MenuScreen() {
             className="rounded-xl border border-slate-600 px-6 py-3 text-sm font-semibold text-slate-300 transition hover:border-slate-400 hover:text-white"
           >
             🗺️ Choose a scenario
+          </button>
+          <button
+            onClick={openSandbox}
+            className="rounded-xl border border-slate-700 px-6 py-3 text-[13px] font-semibold text-slate-400 transition hover:border-cyan-500/60 hover:text-cyan-300"
+          >
+            🧪 Sandbox <span className="font-normal opacity-70">· free build, no scoring</span>
           </button>
         </motion.div>
 

@@ -218,8 +218,10 @@ export function RunTimelineExpanded({ onClose }: { onClose: () => void }) {
                 <g>
                   <circle cx={g.x(worstIdx)} cy={g.y(worst / 100)} r="3.5" fill="#f87171" />
                   <text
-                    x={g.x(worstIdx)}
-                    y={g.y(worst / 100) + 16}
+                    // Keep the label clear of the axis labels and the plot edges:
+                    // flip above the dot when it sits low, and clamp horizontally.
+                    x={Math.max(PLOT.x + 28, Math.min(PLOT.x + PLOT.w - 28, g.x(worstIdx)))}
+                    y={worst < 20 ? g.y(worst / 100) - 9 : g.y(worst / 100) + 16}
                     textAnchor="middle"
                     fontSize="9.5"
                     fill="#f87171"

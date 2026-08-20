@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '../store'
+import { SANDBOX_ID } from '../game/scenarios'
 
 const PHASE_STYLE: Record<string, { label: string; cls: string }> = {
   baseline: { label: 'BASELINE', cls: 'bg-sky-500/20 text-sky-300 border-sky-500/40' },
@@ -64,7 +65,10 @@ export function HUD() {
               <div className={`text-sm font-bold tabular-nums ${overBudget ? 'text-red-400' : 'text-emerald-400'}`}>
                 ${cost}
               </div>
-              <div className="text-[8px] uppercase tracking-wider text-slate-500">/mo (cap ${scenario.budget})</div>
+              <div className="text-[8px] uppercase tracking-wider text-slate-500">
+                {/* The sandbox has no budget — don't show it a cap. */}
+                {scenario.id === SANDBOX_ID ? '/mo · no cap' : `/mo (cap $${scenario.budget})`}
+              </div>
             </div>
             {queued > 0 && (
               <div className="text-center">

@@ -18,6 +18,7 @@ import { VpcNode, AzNode } from './components/ZoneNode'
 import { TrafficEdge } from './components/TrafficEdge'
 import { Palette } from './components/Palette'
 import { ScenarioPanel } from './components/ScenarioPanel'
+import { SandboxPanel } from './components/SandboxPanel'
 import { HUD } from './components/HUD'
 import { ResultsModal } from './components/ResultsModal'
 import { MenuScreen } from './components/MenuScreen'
@@ -26,6 +27,7 @@ import { ScenarioSelect } from './components/ScenarioSelect'
 import { ScenarioEditor } from './components/ScenarioEditor'
 import { TutorialCoach } from './components/TutorialCoach'
 import { CATEGORY_COLORS, SERVICES } from './game/services'
+import { SANDBOX_ID } from './game/scenarios'
 
 const nodeTypes = { service: ServiceNode, users: UsersNode, vpc: VpcNode, az: AzNode }
 const edgeTypes = { traffic: TrafficEdge }
@@ -161,6 +163,7 @@ function Canvas() {
 export default function App() {
   const screen = useGameStore((s) => s.screen)
   const returnToMenu = useGameStore((s) => s.returnToMenu)
+  const isSandbox = useGameStore((s) => s.scenarioId === SANDBOX_ID)
 
   if (screen === 'menu') return <MenuScreen />
   if (screen === 'select') return <ScenarioSelect />
@@ -184,7 +187,7 @@ export default function App() {
             ⌂
           </button>
         </header>
-        <ScenarioPanel />
+        {isSandbox ? <SandboxPanel /> : <ScenarioPanel />}
         <div className="border-t border-slate-800 pt-3">
           <Palette />
         </div>

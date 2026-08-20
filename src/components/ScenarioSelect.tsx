@@ -173,6 +173,7 @@ export function ScenarioSelect() {
   const playScenario = useGameStore((s) => s.playScenario)
   const returnToMenu = useGameStore((s) => s.returnToMenu)
   const openEditor = useGameStore((s) => s.openEditor)
+  const openSandbox = useGameStore((s) => s.openSandbox)
   const bestStars = useGameStore((s) => s.bestStars)
   const currentId = useGameStore((s) => s.scenarioId)
   // Re-render the custom section when authored scenarios change.
@@ -190,12 +191,20 @@ export function ScenarioSelect() {
               Tracks are independent — jump straight to the domain you care about.
             </p>
           </div>
-          <button
-            onClick={returnToMenu}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
-          >
-            ⌂ Menu
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={openSandbox}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-cyan-500/60 hover:text-cyan-300"
+            >
+              🧪 Sandbox
+            </button>
+            <button
+              onClick={returnToMenu}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
+            >
+              ⌂ Menu
+            </button>
+          </div>
         </div>
 
         <div className="space-y-8 pb-10">

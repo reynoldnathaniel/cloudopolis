@@ -107,6 +107,17 @@ export downloads your whole library as one JSON file, and import merges a file b
 skipping scenarios you already have — an idempotent backup/restore that survives cleared
 browser data and moves libraries between machines.
 
+### 🧪 Sandbox mode
+
+A blank region with **no budget, no scoring, and no script**. Press ▶ and the simulation
+runs *endlessly* while you drive it: a live traffic dial (10 → 20,000 rps with one-tap
+presets), a static/app workload toggle, and chaos on demand — kill or revive either
+Availability Zone mid-run, and fire the security probe whenever you want. A live hint
+line diagnoses whatever is currently breaking.
+
+That makes it the whiteboard-that-runs: sketch a customer's architecture in front of
+them, then slide the traffic up until something gives.
+
 ### Quality of life
 
 - **Interactive run timeline** in the results: a tick-by-tick chart of the run you just

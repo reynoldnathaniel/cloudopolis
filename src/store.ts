@@ -23,7 +23,7 @@ import {
   type SecurityFinding,
 } from './game/engine'
 import { SERVICES } from './game/services'
-import { getScenario, type Scenario } from './game/scenarios'
+import { getScenario, SANDBOX_ID, type Scenario } from './game/scenarios'
 // Importing this module also loads + registers saved custom scenarios, so it
 // must stay above the saved-game validation below (imports run before body).
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
@@ -104,6 +104,14 @@ interface GameStore {
   briefingOpen: boolean
   /** Scenario ids whose briefing has been seen (persisted; auto-open is first-time-only) */
   briefingSeen: string[]
+  /** Live traffic dial for sandbox mode (rps) */
+  sandboxRps: number
+  /** Sandbox workload type: 'static' is servable by S3/CDN, 'app' needs compute + a datastore */
+  sandboxNeed: 'static' | 'app'
+  /** Live diagnosis of what is currently breaking, shown while the sandbox runs */
+  sandboxHint: string | null
+  /** AZs the player has manually killed in sandbox mode */
+  sandboxDeadAzs: AzId[]
   /** Player-authored scenarios (persisted separately under simcloud-custom-v1) */
   customScenarios: Scenario[]
   /** Custom scenario being edited, or null when the editor creates a new one */
@@ -116,6 +124,14 @@ interface GameStore {
   playScenario: (id: string) => void
   openBriefing: () => void
   closeBriefing: () => void
+  /** Enter the sandbox: a blank region with no budget, no scoring, and a live traffic dial */
+  openSandbox: () => void
+  setSandboxRps: (rps: number) => void
+  setSandboxNeed: (need: 'static' | 'app') => void
+  /** Kill or revive an AZ mid-run (sandbox only) */
+  toggleSandboxAz: (az: AzId) => void
+  /** Audit the current design for internet-exposed resources, on demand (sandbox only) */
+  runSandboxProbe: () => void
   /** Open the scenario editor — pass a custom scenario id to edit, or null to create */
   openEditor: (id: string | null) => void
   closeEditor: () => void
@@ -263,6 +279,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   tutorialDone: SAVED.tutorialDone === true,
   briefingOpen: false,
   briefingSeen: Array.isArray(SAVED.briefingSeen) ? SAVED.briefingSeen : [],
+  sandboxRps: 200,
+  sandboxNeed: 'app',
+  sandboxHint: null,
+  sandboxDeadAzs: [],
   customScenarios: initialCustomScenarios,
   editingScenarioId: null,
 
@@ -297,6 +317,34 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       briefingOpen: false,
       briefingSeen: briefingSeen.includes(scenarioId) ? briefingSeen : [...briefingSeen, scenarioId],
     })
+  },
+
+  openSandbox: () => {
+    if (get().scenarioId !== SANDBOX_ID) get().selectScenario(SANDBOX_ID)
+    set({ screen: 'game', briefingOpen: false, sandboxDeadAzs: [], breachedNodeIds: [] })
+  },
+
+  setSandboxRps: (rps) => set({ sandboxRps: Math.max(10, Math.min(20000, Math.round(rps))) }),
+
+  setSandboxNeed: (need) => set({ sandboxNeed: need }),
+
+  toggleSandboxAz: (az) => {
+    const dead = get().sandboxDeadAzs
+    set({ sandboxDeadAzs: dead.includes(az) ? dead.filter((a) => a !== az) : [...dead, az] })
+  },
+
+  runSandboxProbe: () => {
+    const { nodes, edges } = get()
+    const lite: LiteNode[] = nodes
+      .filter((n) => !isZoneNode(n))
+      .map((n) => ({
+        id: n.id,
+        serviceId: serviceIdOf(n),
+        az: ((n.data as { az?: AzId }).az ?? null) as AzId | null,
+        dead: false,
+        unplaced: false,
+      }))
+    set({ breachedNodeIds: securityAudit(lite, toLiteEdges(edges)).map((f) => f.nodeId) })
   },
 
   openEditor: (id) => set({ screen: 'editor', editingScenarioId: id }),
@@ -452,6 +500,63 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const state = get()
     if (state.phase === 'run') return
     const scenario = state.scenario()
+
+    // ---- sandbox: an endless run driven by the live traffic dial ----
+    // Same tick engine, but no phases, no scoring, no end. Traffic, AZ
+    // failures, and the probe are all under the player's hand instead of a
+    // script's, which is what makes it usable as a whiteboard in front of an
+    // audience.
+    if (scenario.id === SANDBOX_ID) {
+      const asgCounts: Record<string, number> = {}
+      for (const n of state.nodes) {
+        if (n.type === 'service' && serviceIdOf(n) === 'asg') asgCounts[n.id] = ASG_MIN
+      }
+      let backlogs: Record<string, number> = {}
+      set({
+        phase: 'run',
+        results: null,
+        runHistory: [],
+        runPhase: 'baseline',
+        liveSuccess: 1,
+        struckAz: null,
+        deadNodeIds: [],
+      })
+
+      timer = setInterval(() => {
+        const { nodes, edges, sandboxRps, sandboxDeadAzs, sandboxNeed } = get()
+        // Read the workload toggle live, so switching static/app mid-run applies.
+        const live = { ...scenario, need: sandboxNeed }
+        const lite: LiteNode[] = []
+        const deadIds: string[] = []
+        for (const n of nodes) {
+          if (isZoneNode(n)) continue
+          const serviceId = serviceIdOf(n)
+          const def = SERVICES[serviceId]
+          const az = ((n.data as { az?: AzId }).az ?? null) as AzId | null
+          const dead = def.zonal && az !== null && sandboxDeadAzs.includes(az)
+          if (dead) deadIds.push(n.id)
+          lite.push({ id: n.id, serviceId, az, dead, unplaced: def.zonal && az === null })
+        }
+
+        const prevStats = get().nodeStats
+        for (const id of Object.keys(asgCounts)) {
+          asgCounts[id] = nextAsgCount(asgCounts[id], prevStats[id]?.inRps ?? 0)
+        }
+
+        const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, asgCounts, backlogs)
+        backlogs = stats.queueBacklogs
+        set({
+          nodeStats: stats.nodeLoads,
+          edgeFlows: stats.edgeFlows,
+          currentRps: sandboxRps,
+          monthlyCost: estimateMonthlyCost(lite, stats.nodeLoads),
+          liveSuccess: stats.total > 0 ? stats.served / stats.total : 1,
+          deadNodeIds: deadIds,
+          sandboxHint: tipsForIssues([...stats.issues])[0] ?? null,
+        })
+      }, TICK_MS)
+      return
+    }
 
     const probePhase: { name: RunPhaseName; rps: number; ticks: number }[] = scenario.hasProbe
       ? [{ name: 'probe', rps: scenario.baselineRps, ticks: 12 }]
