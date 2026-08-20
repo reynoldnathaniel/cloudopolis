@@ -44,14 +44,20 @@ function steady(
     }
   }
   let backlogs: Record<string, number> = {}
-  let stats = simulateTick(effective, edges, rps, scenario, asg, backlogs)
+  // Warm capacity settles alongside fleet counts: "steady" means a workload
+  // that has been running at this rate long enough to be warm, which is exactly
+  // the case a cold start does NOT describe.
+  let warm: Record<string, number> = {}
+  let stats = simulateTick(effective, edges, rps, scenario, asg, backlogs, warm)
   backlogs = stats.queueBacklogs
+  warm = stats.warmCapacity
   for (let i = 0; i < 30; i++) {
     for (const id of Object.keys(asg)) {
       asg[id] = nextFleetCount(svcOf[id], asg[id], stats.nodeLoads[id]?.inRps ?? 0)
     }
-    stats = simulateTick(effective, edges, rps, scenario, asg, backlogs)
+    stats = simulateTick(effective, edges, rps, scenario, asg, backlogs, warm)
     backlogs = stats.queueBacklogs
+    warm = stats.warmCapacity
   }
   return { stats, asg }
 }
@@ -917,5 +923,112 @@ describe('Data: The Feed (the-feed)', () => {
     expect(tips.join(' ')).toContain('replica')
     // ...and the stock advice is untouched everywhere else.
     expect(tipsForIssues(['db-overloaded']).join(' ')).toContain('ElastiCache')
+  })
+})
+
+// -------------------------------------------------- Event-Driven: Trivia Night
+
+describe('Event-Driven: Trivia Night (trivia-night)', () => {
+  const sc = getScenario('trivia-night')
+  const design = (compute: string) => ({
+    nodes: [N('users', 'users'), N('gw', 'apigw'), N('fn', compute), N('db', 'dynamodb')],
+    edges: [E('users', 'gw'), E('gw', 'fn'), E('fn', 'db')],
+  })
+
+  /** Replay the burst square wave the store generates for the spike phase. */
+  function burstRun(compute: string, cycles = 4) {
+    const { nodes, edges } = design(compute)
+    const { onTicks, offTicks } = sc.bursts!
+    let warm: Record<string, number> = {}
+    let served = 0
+    let total = 0
+    const perTick: number[] = []
+    for (let c = 0; c < cycles; c++) {
+      for (let t = 0; t < onTicks + offTicks; t++) {
+        const rps = t < onTicks ? sc.spikeRps : sc.baselineRps
+        const s = simulateTick(nodes, edges, rps, sc, {}, {}, warm)
+        warm = s.warmCapacity
+        // Skip the first cycle: the store's scoring window opens after it too.
+        if (c > 0) {
+          served += s.served
+          total += s.total
+          perTick.push(s.total > 0 ? s.served / s.total : 1)
+        }
+      }
+    }
+    return { rate: total > 0 ? served / total : 1, perTick, warm }
+  }
+
+  it('provisioned concurrency takes the whole burst, at $103/mo', () => {
+    const { nodes, edges } = design('lambda-pc')
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(103)
+    expect(cost).toBeLessThanOrEqual(sc.budget)
+    expect(burstRun('lambda-pc').rate).toBeGreaterThan(0.99)
+    expect(securityAudit(nodes, edges)).toHaveLength(0)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.nodeLoads)).toHaveLength(0)
+  })
+
+  it('plain Lambda is cheaper, handles the baseline, and still misses the bar', () => {
+    const { nodes, edges } = design('lambda')
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    expect(estimateMonthlyCost(nodes, base.nodeLoads)).toBeLessThan(103)
+    const r = burstRun('lambda')
+    expect(r.rate).toBeLessThan(0.95)
+    expect(r.rate).toBeGreaterThan(0.8) // it mostly works — that is what makes it a trap
+  })
+
+  it('every burst reopens cold, because warmth drains while idle', () => {
+    const r = burstRun('lambda')
+    const { onTicks, offTicks } = sc.bursts!
+    const cycle = onTicks + offTicks
+    // The first tick of each scored burst is the worst one, every single time.
+    for (let c = 0; c * cycle < r.perTick.length; c++) {
+      const first = r.perTick[c * cycle]
+      const last = r.perTick[c * cycle + onTicks - 1]
+      expect(first).toBeLessThan(0.8)
+      expect(last).toBeGreaterThan(0.99)
+    }
+  })
+
+  it('a ramped spike would hide the whole problem — the square wave is the mechanic', () => {
+    const { nodes, edges } = design('lambda')
+    // steady() feeds a constant load, which is a function that never goes cold.
+    expect(rate(steady(nodes, edges, sc.spikeRps, sc.id).stats)).toBeGreaterThan(0.99)
+  })
+
+  it('warm capacity decays toward the floor, and never below it', () => {
+    const { nodes, edges } = design('lambda')
+    let warm: Record<string, number> = {}
+    for (let i = 0; i < 3; i++) {
+      warm = simulateTick(nodes, edges, sc.spikeRps, sc, {}, {}, warm).warmCapacity
+    }
+    const hot = warm['fn']
+    expect(hot).toBeGreaterThan(1000)
+    for (let i = 0; i < 30; i++) {
+      warm = simulateTick(nodes, edges, 0, sc, {}, {}, warm).warmCapacity
+    }
+    expect(warm['fn']).toBeLessThan(hot)
+    expect(warm['fn']).toBe(200) // the ambient floor, not zero
+  })
+
+  it('neither fixed fleet can reach 2,500 rps at all', () => {
+    for (const compute of ['asg', 'fargate']) {
+      const { nodes, edges } = design(compute)
+      const s = steady(nodes, edges, sc.spikeRps, sc.id)
+      expect(rate(s.stats)).toBeLessThan(0.95)
+      expect(s.stats.issues).toContain(`overloaded:${SERVICES[compute].name}`)
+    }
+  })
+
+  it('cold starts stay off in every scenario that has not asked for them', () => {
+    const { nodes, edges } = design('lambda')
+    // order-storm shares the compute chain but declares no coldStarts.
+    const s = simulateTick(nodes, edges, 5000, getScenario('order-storm'), {}, {}, {})
+    expect(s.issues).not.toContain('cold-start')
+    expect(s.nodeLoads['fn'].processed).toBeCloseTo(5000, 5)
   })
 })

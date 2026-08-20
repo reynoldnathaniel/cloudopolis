@@ -160,6 +160,52 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ $113/mo')).toBeVisible()
   })
 
+  test('Trivia Night: plain Lambda cold-starts on every burst, PC does not', async ({ page }) => {
+    // One failure already banked, so this run's failure unlocks the reveal.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'simcloud-save-v1',
+        JSON.stringify({ failedRuns: { 'trivia-night': 1 }, tutorialDone: true }),
+      )
+    })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Trivia Night/ }).click()
+    await expect(page.getByText(/only serves what it has/)).toBeVisible()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+    await expect(page.getByText('⚡ bursts')).toBeVisible()
+
+    // "AWS Lambda (" is the plain one; the other is "...with provisioned concurrency".
+    await palette(page, 'Amazon API Gateway').click()
+    await palette(page, 'AWS Lambda (').click()
+    await palette(page, 'Amazon DynamoDB').click()
+    await fitView(page)
+
+    const n = (id: string) => `.react-flow__node[data-id="${id}"]`
+    await connect(page, n('users'), n('apigw-1'))
+    await connect(page, n('apigw-1'), n('lambda-2'))
+    await connect(page, n('lambda-2'), n('dynamodb-3'))
+    expect(await edgeCount(page)).toBe(3)
+
+    await page.getByRole('button', { name: /Simulate/ }).click()
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 60_000 })
+
+    // Fine at baseline, fine on cost — and it still loses the spike, every burst.
+    await expect(page.getByText('✓ 100%').first()).toBeVisible()
+    await expect(page.getByText('✗ 86%')).toBeVisible()
+    await expect(page.getByText(/had containers warm/)).toBeVisible()
+
+    // Provisioned concurrency is the fix, and it earns the stars.
+    await page.getByRole('button', { name: /Stuck\? Reveal/ }).click()
+    await page.getByRole('button', { name: 'Show me' }).click()
+    await expect(page.locator(n('sol-lambda-pc'))).toBeVisible()
+    await page.getByRole('button', { name: /Run the reference design/ }).click()
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 60_000 })
+    await expect(page.getByText('Well-Architected!')).toBeVisible()
+    await expect(page.getByText('✓ $103/mo')).toBeVisible()
+  })
+
   test('The Feed: reads go to the replicas, writes to the one primary', async ({ page }) => {
     // Arrive with the reveal already earned — the unlock rule has its own test.
     await page.addInitScript(() => {

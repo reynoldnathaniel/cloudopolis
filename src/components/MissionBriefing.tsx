@@ -95,6 +95,13 @@ export function MissionBriefing() {
                     that traffic is writes — the rest is reads, and the two do not scale the same way
                   </MissionLine>
                 )}
+                {scenario.coldStarts && (
+                  <MissionLine icon="🥶">
+                    Traffic arrives in <b className="text-orange-300">instant bursts</b>, not a ramp —
+                    and a serverless function only serves what it has{' '}
+                    <b className="text-sky-300">warm</b>. The rest has to cold-start
+                  </MissionLine>
+                )}
                 {scenario.hasOutage && scenario.multiRegion && (
                   <MissionLine icon="🌑">
                     Survive the loss of an entire <b className="text-fuchsia-300">AWS Region</b> —

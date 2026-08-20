@@ -52,12 +52,28 @@ export interface TickStats {
   total: number
   /** Updated queue backlogs — feed these into the next tick */
   queueBacklogs: Record<string, number>
+  /** Updated warm capacity per cold-start service — feed these into the next tick */
+  warmCapacity: Record<string, number>
   issues: string[]
 }
 
 const CACHE_RATIO_STATIC = 0.8
 const CACHE_RATIO_APP = 0.3
 const CACHE_HIT_RATIO = 0.7
+
+// Cold starts. A serverless function keeps some capacity warm; traffic beyond
+// it needs new containers, and starting them is fast but not free. Warm
+// capacity climbs quickly toward demand and drains away slowly when the traffic
+// stops — which is why a workload that is idle between bursts pays again every
+// single burst.
+/** rps a plain function keeps warm with no traffic at all */
+const COLD_AMBIENT = 200
+/** rps of warm capacity gained per tick while climbing */
+const COLD_RAMP = 800
+/** rps of warm capacity lost per tick while idle */
+const COLD_DECAY = 400
+/** share of cold-started requests that time out rather than just running slow */
+const COLD_TIMEOUT_RATE = 0.5
 
 // Elastic fleets (ASG instances, Fargate tasks). Each service declares its own
 // numbers in `services.ts`; the difference in `rate` is what makes containers
@@ -84,6 +100,7 @@ export function simulateTick(
   scenario: Scenario,
   fleetCounts: Record<string, number> = {},
   queueBacklogs: Record<string, number> = {},
+  warmCapacity: Record<string, number> = {},
 ): TickStats {
   const nodeById = new Map(nodes.map((n) => [n.id, n]))
   const out = new Map<string, LiteEdge[]>()
@@ -116,6 +133,7 @@ export function simulateTick(
   const nodeLoads: Record<string, NodeLoad> = {}
   const edgeFlows: Record<string, number> = {}
   const newBacklogs: Record<string, number> = {}
+  const newWarm: Record<string, number> = { ...warmCapacity }
   const issues = new Set<string>()
   let served = 0
   let dropped = 0
@@ -130,6 +148,7 @@ export function simulateTick(
       dropped: rps,
       total: rps,
       queueBacklogs: { ...queueBacklogs },
+      warmCapacity: { ...warmCapacity },
       issues: ['users-disconnected'],
     }
   }
@@ -338,10 +357,32 @@ export function simulateTick(
       case 'compute': {
         const cap = effectiveCapacity(node)
         const instances = def.scaling ? (fleetCounts[id] ?? def.scaling.min) : undefined
-        const p = Math.min(L, cap)
+        let p = Math.min(L, cap)
         const over = L - p
         dropped += over
         if (over > 1) issues.add(`overloaded:${def.name}`)
+
+        // Cold starts: anything above what this function has warm needs a new
+        // container. Those requests run slow, and some fraction of them run so
+        // slow the caller gives up.
+        if (scenario.coldStarts === true && def.coldStart === true) {
+          const floor = def.warmFloor ?? COLD_AMBIENT
+          const warm = Math.max(floor, warmCapacity[id] ?? floor)
+          // What this tick asked the function to be ready for — containers get
+          // started for everything that arrived, not just what survived.
+          const target = p
+          const timedOut = Math.max(0, target - warm) * COLD_TIMEOUT_RATE
+          if (timedOut > 1) {
+            dropped += timedOut
+            issues.add('cold-start')
+            p -= timedOut
+          }
+          newWarm[id] =
+            target > warm
+              ? Math.min(target, warm + COLD_RAMP)
+              : Math.max(floor, target, warm - COLD_DECAY)
+        }
+
         if (scenario.need === 'app') {
           const appTargets = outs.filter((e) => {
             const t = nodeById.get(e.target)
@@ -516,6 +557,7 @@ export function simulateTick(
     dropped,
     total: rps + extraTotal,
     queueBacklogs: newBacklogs,
+    warmCapacity: newWarm,
     issues: [...issues],
   }
 }
@@ -611,6 +653,8 @@ export const ISSUE_TIPS: Record<string, string> = {
   'static-cant-dynamic': 'S3 can only serve files — it cannot run application logic. This app needs a compute tier (EC2 or Lambda).',
   'compute-no-db': 'Your compute tier has no database or model behind it, so dynamic requests are failing. Connect it onward.',
   'db-overloaded': 'Your database saturated. Put ElastiCache in front to absorb reads, or spread the load across more databases.',
+  'cold-start':
+    'Requests arrived faster than your functions had containers warm, and the ones that had to cold-start timed out. Serverless scales fast, not instantly — a burst from near-idle pays for every container it starts.',
   'writes-need-primary':
     'Replicas answer reads and refuse writes, so your writes had nowhere to go. Keep the RDS primary in the design — replicas scale reads out, they do not replace the one writer.',
   'replica-no-primary':

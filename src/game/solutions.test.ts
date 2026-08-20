@@ -115,6 +115,7 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
   }
 
   let backlogs: Record<string, number> = {}
+  let warm: Record<string, number> = {}
   let prevLoads: Record<string, { inRps: number }> = {}
   let prevRps = 0
   let cost = 0
@@ -126,8 +127,15 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
 
   for (const ph of phases) {
     for (let tick = 0; tick < ph.ticks; tick++) {
-      const ramp = Math.min(1, (tick + 1) / RAMP_TICKS)
-      const rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
+      const burst = scenario.bursts
+      let rps: number
+      if (burst && ph.name === 'spike') {
+        const cycle = burst.onTicks + burst.offTicks
+        rps = tick % cycle < burst.onTicks ? ph.rps : scenario.baselineRps
+      } else {
+        const ramp = Math.min(1, (tick + 1) / RAMP_TICKS)
+        rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
+      }
       const outageNow = ph.name === 'outage'
 
       const lite: LiteNode[] = nodes.map((n) => {
@@ -152,8 +160,9 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
         findings = securityAudit(lite, edges).length
       }
 
-      const stats = simulateTick(lite, edges, rps, scenario, fleets, backlogs)
+      const stats = simulateTick(lite, edges, rps, scenario, fleets, backlogs, warm)
       backlogs = stats.queueBacklogs
+      warm = stats.warmCapacity
       prevLoads = stats.nodeLoads
 
       runServed += stats.served

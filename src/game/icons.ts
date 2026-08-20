@@ -32,6 +32,7 @@ export const ICONS: Record<string, string> = {
   asg,
   fargate,
   lambda,
+  'lambda-pc': lambda,
   s3,
   cloudfront,
   alb,

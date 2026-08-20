@@ -89,6 +89,8 @@ export function ScenarioPanel() {
           {scenario.writeFraction !== undefined && (
             <Chip tone="text-violet-300">✍️ {Math.round(scenario.writeFraction * 100)}% writes</Chip>
           )}
+          {scenario.bursts && <Chip tone="text-orange-300">⚡ bursts</Chip>}
+          {scenario.coldStarts && <Chip tone="text-sky-300">🥶 cold starts</Chip>}
           {scenario.hasProbe && <Chip tone="text-amber-300">🕵️ probe</Chip>}
         </div>
 

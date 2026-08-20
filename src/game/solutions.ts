@@ -212,6 +212,16 @@ export const SOLUTIONS: Record<string, Solution> = {
     ],
   },
 
+  'trivia-night': {
+    nodes: chain('apigw', 'lambda-pc', 'dynamodb'),
+    edges: link('users', 'apigw', 'lambda-pc', 'dynamodb'),
+    notes: [
+      'Provisioned concurrency keeps 2,500 rps of containers hot around the clock, so the whole burst lands on capacity that already exists. Nothing has to start; nothing times out.',
+      'Plain Lambda serves this fine on average and still fails: warmth drains away during the quiet thirty seconds, so every round reopens against a cold function and the first waves of answers time out.',
+      'That flat $60/mo buys readiness for traffic that only exists one second in thirty. It is the right trade exactly when a burst cannot be queued and cannot be late.',
+    ],
+  },
+
   'click-stream': {
     nodes: chain('kinesis', 'lambda', 'sagemaker'),
     edges: link('users', 'kinesis', 'lambda', 'sagemaker'),

@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 7 tracks, 12 scenarios
+### 7 tracks, 13 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -67,7 +67,7 @@ style you want to learn.
 | 🐳 **Containers** | The Replatform | Fargate as the middle path — tasks scale twice as fast as VMs and bill in $8 slices, and at *sustained* load that beats pay-per-request outright |
 | 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
 | 🗄️ **Data** | The Feed | A read/write split: 10% of traffic writes and must reach the one primary, 90% reads and can fan out over read replicas — which are fixed-size, so you size them for the peak and pay for them at the trough |
-| 📨 **Event-Driven** | Order Storm | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing |
+| 📨 **Event-Driven** | Order Storm · Trivia Night | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue |
 | 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
 | 🌍 **Going Global** | The Blackout | An entire Region dies. Route 53 health checks fail traffic over to a complete second stack — and because the survivor absorbs *all* the load, only elastic services make two full regions affordable |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
@@ -98,6 +98,11 @@ style you want to learn.
   reads fan out over read replicas when any are wired. Replicas refuse writes and are useless
   without a primary to stream from, so the classic mistakes ("replicas instead of the primary",
   "one big primary for everything") each fail in their own way.
+- **Cold starts** — in scenarios that ask for them, a serverless function only serves what it has
+  warm. Warm capacity climbs quickly toward demand and drains away while idle, so a workload that
+  is quiet between bursts goes cold again before every one of them. Provisioned concurrency buys a
+  floor that never goes cold. Paired with **burst traffic**: a square wave that slams between peak
+  and idle with no ramp, because a ramp gives a function all the time it needs to warm up.
 - **Retrieve-then-generate chains** — a vector store (OpenSearch) is a *mid-chain* stage: it
   grounds a request and forwards all of it onward, answering nothing itself. A request counts
   as served only once it completes the whole chain, so RAG is visible on the canvas as
@@ -285,7 +290,7 @@ replaying the level by hand.
 
 - WAF + DDoS event, extending the security probe into a scenario of its own
 - EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
-- Lambda cold starts · mid-run decision events
+- Mid-run decision events
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---

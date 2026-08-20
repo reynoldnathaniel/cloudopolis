@@ -745,6 +745,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         if (min > 0) fleetCounts[n.id] = min
       }
       let backlogs: Record<string, number> = {}
+      let warm: Record<string, number> = {}
       set({
         phase: 'run',
         paused: false,
@@ -779,8 +780,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], prevStats[id]?.inRps ?? 0)
         }
 
-        const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, fleetCounts, backlogs)
+        const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, fleetCounts, backlogs, warm)
         backlogs = stats.queueBacklogs
+        warm = stats.warmCapacity
         set({
           nodeStats: stats.nodeLoads,
           edgeFlows: stats.edgeFlows,
@@ -870,6 +872,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
     // Queue backlogs carry between ticks; async scoring is run-wide.
     let backlogState: Record<string, number> = {}
+    // Warm capacity per cold-start function, carried between ticks.
+    let warmState: Record<string, number> = {}
     let runServed = 0
     let runTotal = 0
     let runDropped = 0
@@ -893,8 +897,18 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const doTick = () => {
       const { nodes, edges } = get()
       const ph = phases[phaseIdx]
-      const ramp = Math.min(1, (tickInPhase + 1) / RAMP_TICKS)
-      const rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
+      // Burst scenarios square-wave the spike phase instead of ramping into it:
+      // the instantaneous jump is the whole mechanic, since a gentle ramp gives
+      // a serverless function all the time it needs to warm up.
+      const burst = scenario.bursts
+      let rps: number
+      if (burst && ph.name === 'spike') {
+        const cycle = burst.onTicks + burst.offTicks
+        rps = tickInPhase % cycle < burst.onTicks ? ph.rps : scenario.baselineRps
+      } else {
+        const ramp = Math.min(1, (tickInPhase + 1) / RAMP_TICKS)
+        rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
+      }
 
       const outageNow = ph.name === 'outage'
       const lite: LiteNode[] = []
@@ -934,8 +948,17 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         set({ breachedNodeIds: probeFindings.map((f) => f.nodeId) })
       }
 
-      const stats = simulateTick(lite, toLiteEdges(edges), rps, scenario, fleetCounts, backlogState)
+      const stats = simulateTick(
+        lite,
+        toLiteEdges(edges),
+        rps,
+        scenario,
+        fleetCounts,
+        backlogState,
+        warmState,
+      )
       backlogState = stats.queueBacklogs
+      warmState = stats.warmCapacity
       const cost = estimateMonthlyCost(lite, stats.nodeLoads)
       history.push({
         rps,

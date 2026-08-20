@@ -74,6 +74,14 @@ export interface ServiceDef {
    * `writeFraction`; elsewhere it behaves as an ordinary data store.
    */
   readsOnly?: boolean
+  /**
+   * Pays a cold-start penalty for traffic above what it currently has warm.
+   * Only meaningful in scenarios that declare `coldStarts`; everywhere else
+   * these services behave as they always have.
+   */
+  coldStart?: boolean
+  /** Pre-warmed capacity in rps that never goes cold (provisioned concurrency). */
+  warmFloor?: number
   blurb: string
 }
 
@@ -226,7 +234,26 @@ export const SERVICES: Record<string, ServiceDef> = {
     capacity: 10000,
     autoScales: true,
     zonal: false,
-    blurb: 'Runs code without servers. Auto-scales with traffic; you pay per request, $0 when idle.',
+    coldStart: true,
+    blurb:
+      'Runs code without servers. Auto-scales with traffic; you pay per request, $0 when idle. Scaling is fast but not instantaneous — a burst far above what it has warm pays for the containers it has to start.',
+  },
+  'lambda-pc': {
+    id: 'lambda-pc',
+    name: 'Lambda PC',
+    fullName: 'AWS Lambda with provisioned concurrency',
+    abbr: 'λ+',
+    category: 'compute',
+    role: 'compute',
+    monthlyCost: 60,
+    costPerRps: 0.15,
+    capacity: 10000,
+    autoScales: true,
+    zonal: false,
+    coldStart: true,
+    warmFloor: 2500,
+    blurb:
+      'Lambda with a pre-warmed floor: 2,500 rps of capacity kept hot around the clock for a flat $60/mo, on top of the usual per-request price. Bursts inside the floor start instantly; above it, you are cold-starting like anyone else.',
   },
   apigw: {
     id: 'apigw',
@@ -404,7 +431,10 @@ export interface PaletteGroup {
 /** Palette, grouped for display (everything except the Users node) */
 export const PALETTE_GROUPS: PaletteGroup[] = [
   { label: 'Edge & Network', items: [SERVICES.route53, SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
-  { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda] },
+  {
+    label: 'Compute',
+    items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda, SERVICES['lambda-pc']],
+  },
   {
     label: 'Data',
     items: [SERVICES.s3, SERVICES.rds, SERVICES['rds-replica'], SERVICES.dynamodb, SERVICES.elasticache],

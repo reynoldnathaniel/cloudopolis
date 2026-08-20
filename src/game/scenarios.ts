@@ -44,7 +44,8 @@ export const TRACKS: Track[] = [
     id: 'event-driven',
     name: 'Event-Driven',
     emoji: '📨',
-    description: 'Queues and pub/sub: lose no event, even when bursts dwarf your compute.',
+    description:
+      'Queues and pub/sub: lose no event when bursts dwarf your compute — and what to do when you are not allowed to buffer at all.',
   },
   {
     id: 'streaming',
@@ -88,6 +89,18 @@ export interface Scenario {
    * fan out over read replicas when any are wired.
    */
   writeFraction?: number
+  /**
+   * Serverless functions pay a cold-start penalty for traffic above what they
+   * have warm. Off by default so the levels built before this mechanic keep
+   * behaving exactly as they did.
+   */
+  coldStarts?: boolean
+  /**
+   * Replaces the ramped spike with a square wave: `onTicks` at spikeRps, then
+   * `offTicks` back at baseline, repeating. No ramp — the instantaneous jump is
+   * the entire point, since it is what catches a function cold.
+   */
+  bursts?: { onTicks: number; offTicks: number }
   baselineRps: number
   spikeRps: number
   spikeLabel: string
@@ -359,6 +372,35 @@ export const SCENARIOS: Scenario[] = [
       'Lambda tops out at 10,000 RPS. The burst is 12,000. A synchronous design MUST drop orders.',
       'A queue turns a burst into a backlog. Backlogs drain; dropped requests are gone forever.',
       'The pattern: API Gateway → SNS → SQS → Lambda → database. Publish, buffer, then process at your own pace.',
+    ],
+  },
+  {
+    id: 'trivia-night',
+    track: 'event-driven',
+    order: 2,
+    difficulty: 2,
+    title: 'Trivia Night',
+    emoji: '⚡',
+    hook: 'Dead quiet, then 2,500 answers in the same second. Ten times a night.',
+    brief:
+      'Your live quiz app has a very particular shape: nothing happens for thirty seconds, the host reads a question, and then every player in the country taps an answer inside the same second. Then nothing again. Ten rounds a night. You cannot queue the answers and process them later — an answer scored after the reveal is void — so the compute has to be ready the instant the question closes, and it has to be worth paying for during the thirty seconds it does nothing.',
+    need: 'app',
+    baselineRps: 100,
+    spikeRps: 2500,
+    spikeLabel: '⚡ Question closes — every player answers at once!',
+    budget: 120,
+    hasProbe: true,
+    coldStarts: true,
+    // Ten rounds a night, in miniature: slam on, slam off, repeat.
+    bursts: { onTicks: 4, offTicks: 4 },
+    banned: ['sqs', 'sns', 'kinesis'],
+    bannedReason:
+      'An answer scored after the reveal is void — every submission has to be handled the moment it lands, not drained from a backlog.',
+    requiredServices: ['lambda-pc'],
+    goalHints: [
+      'Serverless scales fast, not instantly. A function keeps only so much capacity warm, and a jump from 100 to 2,500 rps has to start containers for the difference — the requests waiting on them time out.',
+      'Warmth drains away while you are idle, so every single round starts cold again. This is the workload provisioned concurrency exists for.',
+      'Fixed fleets cannot help here: an Auto Scaling group tops out at 1,500 rps and Fargate at 2,000, and anything sized for 2,500 sits idle for the other thirty seconds of every round.',
     ],
   },
   // ---------------------------------------------------------- Streaming
