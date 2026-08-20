@@ -583,7 +583,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // global ones (DNS, CDN) in the gutter beside Users.
     if (!exact && scenario.multiRegion) {
       if (def.global) {
-        node.position = { x: 165 + Math.random() * 20, y: 180 + Math.random() * 200 }
+        // The gutter beside Users, stacked so DNS and the CDN never overlap.
+        const globals = get().nodes.filter(
+          (n) => n.type === 'service' && SERVICES[serviceIdOf(n)].global === true,
+        ).length
+        node.position = { x: 165, y: 170 + globals * 110 }
       } else {
         const counts: Record<RegionId, number> = { use1: 0, apne2: 0 }
         for (const n of get().nodes) {
@@ -615,8 +619,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         node.data = { serviceId, az }
         node.position = { x: 30 + (counts[az] % 2) * 20, y: 44 + counts[az] * 92 }
       } else {
-        node.position = { x: 130 + Math.random() * 120, y: 90 + Math.random() * 130 }
+        // The column between Users and the VPC box.
+        const stacked = get().nodes.filter(
+          (n) => n.type === 'service' && !(n.data as { az?: AzId }).az,
+        ).length
+        node.position = { x: 140, y: 80 + stacked * 110 }
       }
+    } else if (!exact) {
+      // Click-to-add on an open canvas: lay nodes out on a grid instead of
+      // scattering them at random points, which used to drop services on top of
+      // each other — a nuisance to untangle, and a coin flip for anything
+      // dragging edges between them.
+      const placed = get().nodes.filter((n) => n.type === 'service').length
+      node.position = { x: 300 + (placed % 3) * 210, y: 80 + Math.floor(placed / 3) * 130 }
     }
 
     set({ nodes: [...get().nodes, node] })

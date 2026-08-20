@@ -41,12 +41,9 @@ export function Palette() {
                       e.dataTransfer.setData('application/simcloud', def.id)
                       e.dataTransfer.effectAllowed = 'move'
                     }}
-                    onClick={() =>
-                      addServiceNode(def.id, {
-                        x: 320 + Math.random() * 260,
-                        y: 120 + Math.random() * 320,
-                      })
-                    }
+                    // The store decides where a clicked-in service lands; only a
+                    // drag-and-drop carries a position of its own.
+                    onClick={() => addServiceNode(def.id, { x: 0, y: 0 })}
                     className={`group relative flex items-center gap-2 rounded-lg border p-2 text-left transition hover:border-slate-500 hover:bg-slate-800 ${
                       highlight === `palette-${def.id}`
                         ? 'animate-pulse border-cyan-400 bg-cyan-500/10 ring-2 ring-cyan-400/50'
