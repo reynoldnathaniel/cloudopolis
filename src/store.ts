@@ -15,8 +15,8 @@ import {
   tipsForIssues,
   securityAudit,
   blueprintMissing,
-  nextAsgCount,
-  ASG_MIN,
+  nextFleetCount,
+  fleetMin,
   type NodeLoad,
   type LiteNode,
   type LiteEdge,
@@ -564,9 +564,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // script's, which is what makes it usable as a whiteboard in front of an
     // audience.
     if (scenario.id === SANDBOX_ID) {
-      const asgCounts: Record<string, number> = {}
+      const fleetCounts: Record<string, number> = {}
       for (const n of state.nodes) {
-        if (n.type === 'service' && serviceIdOf(n) === 'asg') asgCounts[n.id] = ASG_MIN
+        if (n.type !== 'service') continue
+        const min = fleetMin(serviceIdOf(n))
+        if (min > 0) fleetCounts[n.id] = min
       }
       let backlogs: Record<string, number> = {}
       set({
@@ -596,11 +598,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         }
 
         const prevStats = get().nodeStats
-        for (const id of Object.keys(asgCounts)) {
-          asgCounts[id] = nextAsgCount(asgCounts[id], prevStats[id]?.inRps ?? 0)
+        for (const id of Object.keys(fleetCounts)) {
+          const svc = serviceIdOf(nodes.find((n) => n.id === id)!)
+          fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], prevStats[id]?.inRps ?? 0)
         }
 
-        const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, asgCounts, backlogs)
+        const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, fleetCounts, backlogs)
         backlogs = stats.queueBacklogs
         set({
           nodeStats: stats.nodeLoads,
@@ -662,9 +665,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const startedAt = performance.now()
 
     // Auto Scaling groups start at minimum size and react to observed load.
-    const asgCounts: Record<string, number> = {}
+    const fleetCounts: Record<string, number> = {}
     for (const n of state.nodes) {
-      if (n.type === 'service' && serviceIdOf(n) === 'asg') asgCounts[n.id] = ASG_MIN
+      if (n.type !== 'service') continue
+      const min = fleetMin(serviceIdOf(n))
+      if (min > 0) fleetCounts[n.id] = min
     }
 
     let probeFindings: SecurityFinding[] | null = null
@@ -711,8 +716,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
       // ASGs scale toward last tick's observed load — spin-up takes time.
       const prevStats = get().nodeStats
-      for (const id of Object.keys(asgCounts)) {
-        asgCounts[id] = nextAsgCount(asgCounts[id], prevStats[id]?.inRps ?? 0)
+      for (const id of Object.keys(fleetCounts)) {
+        const svc = serviceIdOf(nodes.find((n) => n.id === id)!)
+        fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], prevStats[id]?.inRps ?? 0)
       }
 
       // The probe audits the design once, the moment the phase begins.
@@ -721,7 +727,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         set({ breachedNodeIds: probeFindings.map((f) => f.nodeId) })
       }
 
-      const stats = simulateTick(lite, toLiteEdges(edges), rps, scenario, asgCounts, backlogState)
+      const stats = simulateTick(lite, toLiteEdges(edges), rps, scenario, fleetCounts, backlogState)
       backlogState = stats.queueBacklogs
       const cost = estimateMonthlyCost(lite, stats.nodeLoads)
       history.push({

@@ -4,6 +4,7 @@
 import ec2 from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Compute/64/Arch_Amazon-EC2_64.svg'
 import asg from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Compute/64/Arch_Amazon-EC2-Auto-Scaling_64.svg'
 import lambda from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Compute/64/Arch_AWS-Lambda_64.svg'
+import fargate from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Containers/64/Arch_AWS-Fargate_64.svg'
 import s3 from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Storage/64/Arch_Amazon-Simple-Storage-Service_64.svg'
 import cloudfront from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Amazon-CloudFront_64.svg'
 import alb from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Elastic-Load-Balancing_64.svg'
@@ -24,6 +25,7 @@ import opensearch from 'aws-icons/icons/architecture-service/AmazonOpenSearchSer
 export const ICONS: Record<string, string> = {
   ec2,
   asg,
+  fargate,
   lambda,
   s3,
   cloudfront,

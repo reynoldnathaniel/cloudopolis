@@ -1,4 +1,10 @@
-export type TrackId = 'foundations' | 'genai' | 'event-driven' | 'streaming' | 'custom'
+export type TrackId =
+  | 'foundations'
+  | 'containers'
+  | 'genai'
+  | 'event-driven'
+  | 'streaming'
+  | 'custom'
 
 export interface Track {
   id: TrackId
@@ -13,6 +19,12 @@ export const TRACKS: Track[] = [
     name: 'Foundations',
     emoji: '☁️',
     description: 'The core loop: traffic, budgets, spikes, and zone failures. Start here.',
+  },
+  {
+    id: 'containers',
+    name: 'Containers',
+    emoji: '🐳',
+    description: 'The middle path: fleets that scale in seconds and bill by the task.',
   },
   {
     id: 'genai',
@@ -196,6 +208,30 @@ export const SCENARIOS: Scenario[] = [
       'A CDN caches ~30% of even dynamic traffic. Sometimes that is the whole difference.',
       'A maxed-out Auto Scaling group serves 1,500 RPS. Do the spike math with and without a CDN.',
       'One of everything zonal in each AZ — or the outage ends your IPO.',
+    ],
+  },
+  // ---------------------------------------------------------- Containers
+  {
+    id: 'replatform',
+    track: 'containers',
+    order: 1,
+    difficulty: 2,
+    title: 'The Replatform',
+    emoji: '🐳',
+    hook: 'Sustained load all evening. Pay-per-request will eat you alive.',
+    brief:
+      'Your food-delivery client runs a dinner rush that never really stops: 800 requests a second every evening, half again as much at peak. Their VM bill is eating the margin, and when they priced the same thing on pay-per-request the CFO laughed out loud. The board has mandated containers. Size the fleet, pick the right front door, and make the economics work.',
+    need: 'app',
+    baselineRps: 800,
+    spikeRps: 1600,
+    spikeLabel: '🐳 Friday night — the whole city orders at once!',
+    budget: 150,
+    hasProbe: true,
+    requiredServices: ['fargate'],
+    goalHints: [
+      'A Fargate task handles ~100 rps and costs $8/mo. Do the arithmetic for 800.',
+      'Pay-per-request pricing is unbeatable when traffic is spiky and near-zero when idle — and ruinous when it is sustained. This traffic is sustained.',
+      'API Gateway bills per request too. An ALB does the same job here for a flat $20.',
     ],
   },
   // ---------------------------------------------------------- GenAI

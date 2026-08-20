@@ -78,8 +78,8 @@ export function Palette() {
                         {required && <span className="ml-1 text-[9px] text-indigo-400">req</span>}
                       </div>
                       <div className="text-[9px] text-slate-500">
-                        {def.id === 'asg'
-                          ? '2–10 × $35 · scales'
+                        {def.scaling
+                          ? `${def.scaling.min}–${def.scaling.max} × $${def.scaling.costPerUnit} · scales`
                           : `${
                               def.monthlyCost > 0
                                 ? `$${def.monthlyCost}/mo`

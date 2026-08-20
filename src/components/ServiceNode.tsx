@@ -16,8 +16,10 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
   const color = CATEGORY_COLORS[def.category]
   const icon = ICONS[def.id]
 
-  const isAsg = def.id === 'asg'
-  const instances = stats?.instances ?? 2
+  // Elastic fleets (ASG instances, Fargate tasks) render as unit tiles.
+  const fleet = def.scaling
+  const isAsg = fleet !== undefined
+  const instances = stats?.instances ?? fleet?.min ?? 2
   const unplaced = hasVpc && def.zonal && !data.az
   const util = stats?.util ?? 0
   const overloaded = !isDead && util > 1
@@ -88,8 +90,8 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
             {isAsg && running && <span className="ml-1 text-[11px] text-amber-300">×{instances}</span>}
           </div>
           <div className="text-[10px] text-slate-400">
-            {isAsg
-              ? '2–10 × EC2 · $35/ea'
+            {fleet
+              ? `${fleet.min}–${fleet.max} ${fleet.unitLabel} · $${fleet.costPerUnit}/ea`
               : `${def.autoScales ? '∞ auto-scales' : `${def.capacity} RPS`} · ${
                   def.monthlyCost > 0 ? `$${def.monthlyCost}/mo` : def.costPerRps > 0 ? 'pay/use' : 'free'
                 }`}
@@ -99,7 +101,7 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
 
       {isAsg && (
         <div className="flex flex-wrap gap-1 px-2.5 pb-1.5">
-          {Array.from({ length: running ? instances : 2 }).map((_, i) => (
+          {Array.from({ length: running ? instances : (fleet?.min ?? 2) }).map((_, i) => (
             <span
               key={i}
               className="h-2.5 w-2.5 rounded-[3px] transition-all duration-300"

@@ -33,7 +33,7 @@ export interface NodeLoad {
   processed: number
   capacity: number
   util: number
-  /** Auto Scaling groups only: how many instances are currently running */
+  /** Elastic fleets only (ASG / Fargate): units currently running */
   instances?: number
   /** Queues only: events waiting in the backlog after this tick */
   backlog?: number
@@ -55,18 +55,20 @@ const CACHE_RATIO_STATIC = 0.8
 const CACHE_RATIO_APP = 0.3
 const CACHE_HIT_RATIO = 0.7
 
-// Auto Scaling group tuning
-export const ASG_PER_INSTANCE = 150
-export const ASG_MIN = 2
-export const ASG_MAX = 10
-export const ASG_COST_PER_INSTANCE = 35
-/** Instances an ASG can add or remove per tick (scaling is not instant) */
-export const ASG_RATE = 2
+// Elastic fleets (ASG instances, Fargate tasks). Each service declares its own
+// numbers in `services.ts`; the difference in `rate` is what makes containers
+// feel different from VMs.
 
-/** Move an ASG's instance count one tick toward what its observed load demands. */
-export function nextAsgCount(current: number, observedLoad: number): number {
-  const desired = Math.max(ASG_MIN, Math.min(ASG_MAX, Math.ceil(observedLoad / ASG_PER_INSTANCE)))
-  if (desired > current) return Math.min(desired, current + ASG_RATE)
+/** Fleet size a service starts at, or 0 for services that aren't fleets. */
+export const fleetMin = (serviceId: string): number => SERVICES[serviceId]?.scaling?.min ?? 0
+
+/** Move a fleet one tick toward what its observed load demands. */
+export function nextFleetCount(serviceId: string, current: number, observedLoad: number): number {
+  const s = SERVICES[serviceId]?.scaling
+  if (!s) return current
+  const desired = Math.max(s.min, Math.min(s.max, Math.ceil(observedLoad / s.perUnit)))
+  // Scaling up is capped by how fast units start; scaling down is unhurried.
+  if (desired > current) return Math.min(desired, current + s.rate)
   if (desired < current) return Math.max(desired, current - 1)
   return current
 }
@@ -76,7 +78,7 @@ export function simulateTick(
   edges: LiteEdge[],
   rps: number,
   scenario: Scenario,
-  asgCounts: Record<string, number> = {},
+  fleetCounts: Record<string, number> = {},
   queueBacklogs: Record<string, number> = {},
 ): TickStats {
   const nodeById = new Map(nodes.map((n) => [n.id, n]))
@@ -135,7 +137,8 @@ export function simulateTick(
   }
 
   const effectiveCapacity = (n: LiteNode): number => {
-    if (n.serviceId === 'asg') return (asgCounts[n.id] ?? ASG_MIN) * ASG_PER_INSTANCE
+    const scaling = SERVICES[n.serviceId].scaling
+    if (scaling) return (fleetCounts[n.id] ?? scaling.min) * scaling.perUnit
     return SERVICES[n.serviceId].capacity
   }
 
@@ -324,7 +327,7 @@ export function simulateTick(
       }
       case 'compute': {
         const cap = effectiveCapacity(node)
-        const instances = node.serviceId === 'asg' ? (asgCounts[id] ?? ASG_MIN) : undefined
+        const instances = def.scaling ? (fleetCounts[id] ?? def.scaling.min) : undefined
         const p = Math.min(L, cap)
         const over = L - p
         dropped += over
@@ -482,8 +485,8 @@ export function estimateMonthlyCost(nodes: LiteNode[], nodeLoads?: Record<string
   let cost = 0
   for (const n of nodes) {
     const def = SERVICES[n.serviceId]
-    if (n.serviceId === 'asg') {
-      cost += (nodeLoads?.[n.id]?.instances ?? ASG_MIN) * ASG_COST_PER_INSTANCE
+    if (def.scaling) {
+      cost += (nodeLoads?.[n.id]?.instances ?? def.scaling.min) * def.scaling.costPerUnit
       continue
     }
     cost += def.monthlyCost
@@ -598,9 +601,15 @@ export function tipsForIssues(issues: string[]): string[] {
   for (const issue of issues) {
     if (issue.startsWith('overloaded:')) {
       const name = issue.split(':')[1]
+      // Elastic fleets saturate transiently while units start — that's the
+      // mechanic working, not a design flaw, so never tell them to "switch to
+      // something that auto-scales".
+      const def = Object.values(SERVICES).find((s) => s.name === name)
       tips.push(
         OVERLOAD_TIPS[name] ??
-          `${name} hit 100% utilization and started dropping requests. Add more instances, or switch to a service that auto-scales.`,
+          (def?.scaling
+            ? `${name} saturated while the fleet was still scaling up — ${def.scaling.unitLabel} take time to start. Raising the minimum absorbs sharper spikes.`
+            : `${name} hit 100% utilization and started dropping requests. Add more instances, or switch to a service that auto-scales.`),
       )
     } else if (ISSUE_TIPS[issue]) {
       tips.push(ISSUE_TIPS[issue])

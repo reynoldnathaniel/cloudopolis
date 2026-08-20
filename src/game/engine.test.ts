@@ -8,13 +8,14 @@ import {
   estimateMonthlyCost,
   securityAudit,
   blueprintMissing,
-  nextAsgCount,
-  ASG_MIN,
+  nextFleetCount,
+  fleetMin,
   type LiteNode,
   type LiteEdge,
   type TickStats,
 } from './engine'
 import { getScenario } from './scenarios'
+import { SERVICES } from './services'
 
 const N = (id: string, serviceId: string, az?: 'a' | 'b'): LiteNode => ({ id, serviceId, az: az ?? null })
 const E = (source: string, target: string): LiteEdge => ({ id: `${source}->${target}`, source, target })
@@ -33,12 +34,21 @@ function steady(
   const scenario = getScenario(scenarioId)
   const effective = withDead(nodes, dead)
   const asg: Record<string, number> = {}
-  for (const n of nodes) if (n.serviceId === 'asg') asg[n.id] = ASG_MIN
+  const svcOf: Record<string, string> = {}
+  for (const n of nodes) {
+    const min = fleetMin(n.serviceId)
+    if (min > 0) {
+      asg[n.id] = min
+      svcOf[n.id] = n.serviceId
+    }
+  }
   let backlogs: Record<string, number> = {}
   let stats = simulateTick(effective, edges, rps, scenario, asg, backlogs)
   backlogs = stats.queueBacklogs
   for (let i = 0; i < 30; i++) {
-    for (const id of Object.keys(asg)) asg[id] = nextAsgCount(asg[id], stats.nodeLoads[id]?.inRps ?? 0)
+    for (const id of Object.keys(asg)) {
+      asg[id] = nextFleetCount(svcOf[id], asg[id], stats.nodeLoads[id]?.inRps ?? 0)
+    }
     stats = simulateTick(effective, edges, rps, scenario, asg, backlogs)
     backlogs = stats.queueBacklogs
   }
@@ -54,7 +64,14 @@ function runSequence(
 ): { served: number; dropped: number; total: number; finalBacklog: number } {
   const scenario = getScenario(scenarioId)
   const asg: Record<string, number> = {}
-  for (const n of nodes) if (n.serviceId === 'asg') asg[n.id] = ASG_MIN
+  const svcOf: Record<string, string> = {}
+  for (const n of nodes) {
+    const min = fleetMin(n.serviceId)
+    if (min > 0) {
+      asg[n.id] = min
+      svcOf[n.id] = n.serviceId
+    }
+  }
   let backlogs: Record<string, number> = {}
   let served = 0
   let dropped = 0
@@ -62,7 +79,7 @@ function runSequence(
   let prev: TickStats | null = null
   for (const rps of rpsPerTick) {
     if (prev) {
-      for (const id of Object.keys(asg)) asg[id] = nextAsgCount(asg[id], prev.nodeLoads[id]?.inRps ?? 0)
+      for (const id of Object.keys(asg)) asg[id] = nextFleetCount(svcOf[id], asg[id], prev.nodeLoads[id]?.inRps ?? 0)
     }
     const stats = simulateTick(nodes, edges, rps, scenario, asg, backlogs)
     backlogs = stats.queueBacklogs
@@ -286,16 +303,16 @@ describe('Level 5: IPO Day (ipo-day)', () => {
 
 describe('Auto Scaling group behavior', () => {
   it('scales up at most 2 instances per tick toward demand', () => {
-    expect(nextAsgCount(2, 1400)).toBe(4)
-    expect(nextAsgCount(4, 1400)).toBe(6)
-    expect(nextAsgCount(8, 1400)).toBe(10)
+    expect(nextFleetCount('asg', 2, 1400)).toBe(4)
+    expect(nextFleetCount('asg', 4, 1400)).toBe(6)
+    expect(nextFleetCount('asg', 8, 1400)).toBe(10)
   })
   it('caps at 10 and floors at the minimum', () => {
-    expect(nextAsgCount(10, 99999)).toBe(10)
-    expect(nextAsgCount(2, 0)).toBe(ASG_MIN)
+    expect(nextFleetCount('asg', 10, 99999)).toBe(10)
+    expect(nextFleetCount('asg', 2, 0)).toBe(fleetMin('asg'))
   })
   it('scales down one instance at a time', () => {
-    expect(nextAsgCount(10, 100)).toBe(9)
+    expect(nextFleetCount('asg', 10, 100)).toBe(9)
   })
 })
 
@@ -425,6 +442,86 @@ describe('GenAI: Prompt Rush (prompt-rush)', () => {
 })
 
 // ---------------------------------------------------------------- Event-Driven: Order Storm
+
+describe('Containers: The Replatform (replatform)', () => {
+  const sc = getScenario('replatform')
+  const design = (compute: string, edge: string) => ({
+    nodes: [N('users', 'users'), N('edge', edge), N('app', compute), N('db', 'dynamodb')],
+    edges: [E('users', 'edge'), E('edge', 'app'), E('app', 'db')],
+  })
+
+  it('ALB → Fargate → DynamoDB serves the rush and lands at $132/mo', () => {
+    const { nodes, edges } = design('fargate', 'alb')
+    const base = steady(nodes, edges, sc.baselineRps, sc.id)
+    expect(rate(base.stats)).toBeGreaterThan(0.99)
+    expect(base.asg['app']).toBe(8) // 800 rps / 100 per task
+
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id)
+    expect(rate(spike.stats)).toBeGreaterThan(0.99)
+    expect(spike.asg['app']).toBe(16)
+
+    const cost = estimateMonthlyCost(nodes, base.stats.nodeLoads)
+    expect(cost).toBe(132)
+    expect(cost).toBeLessThanOrEqual(sc.budget)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.stats.nodeLoads)).toHaveLength(0)
+    expect(securityAudit(nodes, edges)).toHaveLength(0)
+  })
+
+  it('Lambda serves it fine but the bill fails — sustained load is where per-request loses', () => {
+    const { nodes, edges } = design('lambda', 'alb')
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(188)
+    expect(cost).toBeGreaterThan(sc.budget)
+  })
+
+  it('API Gateway in front of Fargate costs more than the ALB doing the same job', () => {
+    const viaAlb = design('fargate', 'alb')
+    const viaGw = design('fargate', 'apigw')
+    const albCost = estimateMonthlyCost(
+      viaAlb.nodes,
+      steady(viaAlb.nodes, viaAlb.edges, sc.baselineRps, sc.id).stats.nodeLoads,
+    )
+    const gwCost = estimateMonthlyCost(
+      viaGw.nodes,
+      steady(viaGw.nodes, viaGw.edges, sc.baselineRps, sc.id).stats.nodeLoads,
+    )
+    expect(gwCost).toBe(197)
+    expect(gwCost).toBeGreaterThan(albCost)
+    expect(gwCost).toBeGreaterThan(sc.budget)
+  })
+
+  it('an ASG cannot reach the spike at all — 10 instances cap out at 1,500 rps', () => {
+    const { nodes, edges } = design('asg', 'alb')
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id)
+    expect(spike.asg['app']).toBe(10) // maxed
+    expect(rate(spike.stats)).toBeLessThan(0.99)
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(estimateMonthlyCost(nodes, base.nodeLoads)).toBeGreaterThan(sc.budget)
+  })
+
+  it('containers add capacity twice as fast as VMs — the whole personality', () => {
+    const perTick = (serviceId: string) => {
+      const s = SERVICES[serviceId].scaling!
+      return s.rate * s.perUnit
+    }
+    expect(perTick('fargate')).toBe(2 * perTick('asg'))
+
+    // Against a target both fleets can actually reach, containers get there first.
+    const ticksToServe = (serviceId: string, target: number) => {
+      let count = fleetMin(serviceId)
+      const s = SERVICES[serviceId].scaling!
+      for (let t = 1; t <= 20; t++) {
+        count = nextFleetCount(serviceId, count, target)
+        if (count * s.perUnit >= target) return t
+      }
+      return 99
+    }
+    expect(ticksToServe('fargate', 1200)).toBe(2) // 2 → 8 → 12 tasks
+    expect(ticksToServe('asg', 1200)).toBe(3) //     2 → 4 → 6 → 8 instances
+  })
+})
 
 describe('GenAI: Grounded (rag-grounded)', () => {
   const sc = getScenario('rag-grounded')

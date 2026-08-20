@@ -42,6 +42,23 @@ export interface ServiceDef {
   autoScales: boolean
   /** Zonal services live in one Availability Zone and die with it (EC2, RDS, ElastiCache) */
   zonal: boolean
+  /**
+   * Elastic fleets (Auto Scaling groups, Fargate services): capacity is
+   * `units × perUnit`, and the fleet steps toward demand at `rate` units per
+   * tick rather than arriving instantly. The rate is the whole personality —
+   * VMs boot slowly, containers start in seconds.
+   */
+  scaling?: {
+    /** rps one unit (instance / task) handles */
+    perUnit: number
+    min: number
+    max: number
+    costPerUnit: number
+    /** units addable per tick; removal is always 1 per tick */
+    rate: number
+    /** what one unit is called, for the node tile and palette */
+    unitLabel: string
+  }
   /** Queues only: how many events the backlog can hold before overflowing */
   bufferSize?: number
   /** May sit directly on the internet edge without failing the security probe */
@@ -140,13 +157,32 @@ export const SERVICES: Record<string, ServiceDef> = {
     abbr: 'ASG',
     category: 'compute',
     role: 'compute',
-    monthlyCost: 0, // dynamic: $35 per running instance (see estimateMonthlyCost)
+    monthlyCost: 0, // dynamic: see `scaling` below
     costPerRps: 0,
     capacity: 300, // display only — real capacity is instances × 150
     autoScales: true,
     zonal: false,
+    scaling: { perUnit: 150, min: 2, max: 10, costPerUnit: 35, rate: 2, unitLabel: 'instances' },
     blurb:
       'A fleet of EC2 (2–10 instances, $35/mo each) that grows and shrinks with load. Spreads across AZs, so it survives zone failures — but booting instances takes time.',
+  },
+  fargate: {
+    id: 'fargate',
+    name: 'Fargate',
+    fullName: 'Amazon ECS on AWS Fargate (containers)',
+    abbr: 'ECS',
+    category: 'compute',
+    role: 'compute',
+    monthlyCost: 0, // dynamic: see `scaling` below
+    costPerRps: 0,
+    capacity: 200, // display only — real capacity is tasks × 100
+    autoScales: true,
+    zonal: false,
+    // 6 tasks/tick = +600 rps of capacity per tick, exactly twice what an ASG
+    // adds (2 × 150). Containers start in seconds; VMs boot in minutes.
+    scaling: { perUnit: 100, min: 2, max: 20, costPerUnit: 8, rate: 6, unitLabel: 'tasks' },
+    blurb:
+      'Containers without servers to manage. Tasks are small ($8/mo each) and start in seconds, so the fleet tracks load far more closely than VMs — and costs far less than per-request pricing at sustained traffic.',
   },
   lambda: {
     id: 'lambda',
@@ -322,7 +358,7 @@ export interface PaletteGroup {
 /** Palette, grouped for display (everything except the Users node) */
 export const PALETTE_GROUPS: PaletteGroup[] = [
   { label: 'Edge & Network', items: [SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
-  { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.lambda] },
+  { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda] },
   { label: 'Data', items: [SERVICES.s3, SERVICES.rds, SERVICES.dynamodb, SERVICES.elasticache] },
   { label: 'Messaging & Streaming', items: [SERVICES.sqs, SERVICES.sns, SERVICES.kinesis] },
   { label: 'AI', items: [SERVICES.opensearch, SERVICES.bedrock, SERVICES.sagemaker] },
