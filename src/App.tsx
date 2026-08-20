@@ -25,7 +25,7 @@ import { MenuScreen } from './components/MenuScreen'
 import { MissionBriefing } from './components/MissionBriefing'
 import { ScenarioSelect } from './components/ScenarioSelect'
 import { ScenarioEditor } from './components/ScenarioEditor'
-import { TutorialCoach } from './components/TutorialCoach'
+import { TutorialCoach, SandboxCoach } from './components/TutorialCoach'
 import { CATEGORY_COLORS, SERVICES } from './game/services'
 import { SANDBOX_ID } from './game/scenarios'
 
@@ -63,6 +63,7 @@ function Canvas() {
   const editing = useGameStore((s) => s.phase === 'edit')
   const hasVpc = useGameStore((s) => s.scenario().hasVpc === true)
   const tutorialActive = useGameStore((s) => s.tutorialStep !== null)
+  const sandboxTourActive = useGameStore((s) => s.sandboxTutorialStep !== null)
   const { screenToFlowPosition, getInternalNode } = useReactFlow()
 
   const onDrop = useCallback(
@@ -150,7 +151,8 @@ function Canvas() {
       <ResultsModal />
       <MissionBriefing />
       <TutorialCoach />
-      {editing && !tutorialActive && (
+      <SandboxCoach />
+      {editing && !tutorialActive && !sandboxTourActive && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-500 backdrop-blur">
           Drag services in · drag from a node&apos;s right dot to another&apos;s left dot to connect · select + ⌫ to delete
           {hasVpc ? ' · zonal services live inside an AZ box' : ''}

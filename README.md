@@ -118,6 +118,11 @@ line diagnoses whatever is currently breaking.
 That makes it the whiteboard-that-runs: sketch a customer's architecture in front of
 them, then slide the traffic up until something gives.
 
+First visit runs an **11-step guided tour** — it builds a load-balanced two-AZ design with
+you, then walks through the controls that make the sandbox different: turn the traffic up
+until the servers overload, bring it back down, kill a zone and watch the failover, and
+fire the security probe. Replay it any time from the sandbox panel.
+
 ### Quality of life
 
 - **Interactive run timeline** in the results: a tick-by-tick chart of the run you just

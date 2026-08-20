@@ -28,6 +28,7 @@ import { getScenario, SANDBOX_ID, type Scenario } from './game/scenarios'
 // must stay above the saved-game validation below (imports run before body).
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
 import { TUTORIAL_STEPS } from './game/tutorial'
+import { SANDBOX_TUTORIAL_STEPS } from './game/sandboxTutorial'
 
 const TUTORIAL_STEP_COUNT = TUTORIAL_STEPS.length
 
@@ -112,6 +113,12 @@ interface GameStore {
   sandboxHint: string | null
   /** AZs the player has manually killed in sandbox mode */
   sandboxDeadAzs: AzId[]
+  /** Times the probe has been fired this session (drives a tutorial step) */
+  sandboxProbeCount: number
+  /** Current step of the guided sandbox tour, or null when it is off */
+  sandboxTutorialStep: number | null
+  /** Player has finished or skipped the sandbox tour at least once (persisted) */
+  sandboxTutorialDone: boolean
   /** Player-authored scenarios (persisted separately under simcloud-custom-v1) */
   customScenarios: Scenario[]
   /** Custom scenario being edited, or null when the editor creates a new one */
@@ -124,8 +131,13 @@ interface GameStore {
   playScenario: (id: string) => void
   openBriefing: () => void
   closeBriefing: () => void
-  /** Enter the sandbox: a blank region with no budget, no scoring, and a live traffic dial */
+  /** Enter the sandbox: a blank region with no budget, no scoring, and a live traffic dial.
+   *  The guided tour runs automatically the first time. */
   openSandbox: () => void
+  /** Start the sandbox tour from the beginning (also resets the canvas) */
+  startSandboxTutorial: () => void
+  sandboxTutorialNext: () => void
+  sandboxTutorialSkip: () => void
   setSandboxRps: (rps: number) => void
   setSandboxNeed: (need: 'static' | 'app') => void
   /** Kill or revive an AZ mid-run (sandbox only) */
@@ -223,6 +235,7 @@ interface SaveData {
   edges?: Edge[]
   bestStars?: Record<string, number>
   tutorialDone?: boolean
+  sandboxTutorialDone?: boolean
   briefingSeen?: string[]
 }
 
@@ -283,6 +296,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   sandboxNeed: 'app',
   sandboxHint: null,
   sandboxDeadAzs: [],
+  sandboxProbeCount: 0,
+  sandboxTutorialStep: null,
+  sandboxTutorialDone: SAVED.sandboxTutorialDone === true,
   customScenarios: initialCustomScenarios,
   editingScenarioId: null,
 
@@ -322,7 +338,45 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   openSandbox: () => {
     if (get().scenarioId !== SANDBOX_ID) get().selectScenario(SANDBOX_ID)
     set({ screen: 'game', briefingOpen: false, sandboxDeadAzs: [], breachedNodeIds: [] })
+    // First visit: run the guided tour rather than dropping the player into a
+    // blank region with a panel of controls and no explanation.
+    if (!get().sandboxTutorialDone) get().startSandboxTutorial()
   },
+
+  startSandboxTutorial: () => {
+    get().stopRun()
+    set({
+      screen: 'game',
+      // The tour builds a specific design from scratch, so it starts clean.
+      nodes: initialNodesFor(getScenario(SANDBOX_ID)),
+      edges: [],
+      nodeStats: {},
+      edgeFlows: {},
+      phase: 'edit',
+      results: null,
+      deadNodeIds: [],
+      breachedNodeIds: [],
+      sandboxTutorialStep: 0,
+      sandboxRps: 200,
+      sandboxNeed: 'app',
+      sandboxDeadAzs: [],
+      sandboxProbeCount: 0,
+      sandboxHint: null,
+      tutorialStep: null,
+    })
+  },
+
+  sandboxTutorialNext: () => {
+    const step = get().sandboxTutorialStep
+    if (step === null) return
+    if (step + 1 >= SANDBOX_TUTORIAL_STEPS.length) {
+      set({ sandboxTutorialStep: null, sandboxTutorialDone: true })
+    } else {
+      set({ sandboxTutorialStep: step + 1 })
+    }
+  },
+
+  sandboxTutorialSkip: () => set({ sandboxTutorialStep: null, sandboxTutorialDone: true }),
 
   setSandboxRps: (rps) => set({ sandboxRps: Math.max(10, Math.min(20000, Math.round(rps))) }),
 
@@ -344,7 +398,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         dead: false,
         unplaced: false,
       }))
-    set({ breachedNodeIds: securityAudit(lite, toLiteEdges(edges)).map((f) => f.nodeId) })
+    set({
+      breachedNodeIds: securityAudit(lite, toLiteEdges(edges)).map((f) => f.nodeId),
+      sandboxProbeCount: get().sandboxProbeCount + 1,
+    })
   },
 
   openEditor: (id) => set({ screen: 'editor', editingScenarioId: id }),
@@ -879,6 +936,7 @@ useGameStore.subscribe(() => {
           edges: s.edges,
           bestStars: s.bestStars,
           tutorialDone: s.tutorialDone,
+          sandboxTutorialDone: s.sandboxTutorialDone,
           briefingSeen: s.briefingSeen,
         }),
       )

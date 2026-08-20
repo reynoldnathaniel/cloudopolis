@@ -4,8 +4,13 @@
 
 import { estimateMonthlyCost } from '../game/engine'
 import { useGameStore, type AzId } from '../store'
+import { useTutorialHighlight } from './TutorialCoach'
 
 const PRESETS = [100, 500, 2000, 10000]
+
+/** Ring the control the current tutorial step is pointing at. */
+const ring = (on: boolean) =>
+  on ? 'rounded-lg ring-2 ring-cyan-400/70 ring-offset-2 ring-offset-slate-900' : ''
 
 export function SandboxPanel() {
   const phase = useGameStore((s) => s.phase)
@@ -25,6 +30,9 @@ export function SandboxPanel() {
   const clearCanvas = useGameStore((s) => s.clearCanvas)
   const openSelect = useGameStore((s) => s.openSelect)
   const liveSuccess = useGameStore((s) => s.liveSuccess)
+  const startTour = useGameStore((s) => s.startSandboxTutorial)
+  const tourActive = useGameStore((s) => s.sandboxTutorialStep !== null)
+  const highlight = useTutorialHighlight()
 
   const running = phase === 'run'
   const cost = estimateMonthlyCost(
@@ -55,7 +63,7 @@ export function SandboxPanel() {
         </div>
 
         {/* live traffic dial */}
-        <div className="mt-3">
+        <div className={`mt-3 p-1 ${ring(highlight === 'traffic')}`}>
           <div className="mb-1 flex items-baseline justify-between">
             <span className="text-[11px] font-medium text-slate-400">Traffic</span>
             <span className="text-[13px] font-bold tabular-nums text-sky-300">
@@ -91,7 +99,7 @@ export function SandboxPanel() {
         </div>
 
         {/* workload type — decides what counts as "served" */}
-        <div className="mt-3">
+        <div className={`mt-3 p-1 ${ring(highlight === 'workload')}`}>
           <div className="mb-1 text-[11px] font-medium text-slate-400">Workload</div>
           <div className="flex gap-1">
             {(
@@ -144,7 +152,7 @@ export function SandboxPanel() {
         {/* chaos on demand */}
         <div className="mt-3">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Chaos</div>
-          <div className="flex gap-1">
+          <div className={`flex gap-1 p-1 ${ring(highlight === 'chaos')}`}>
             {(['a', 'b'] as AzId[]).map((az) => {
               const dead = deadAzs.includes(az)
               return (
@@ -165,7 +173,7 @@ export function SandboxPanel() {
           </div>
           <button
             onClick={runProbe}
-            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/60 px-1.5 py-1 text-[10px] font-semibold text-slate-300 transition hover:border-amber-500/50"
+            className={`mt-1 w-full rounded-md border border-slate-700 bg-slate-800/60 px-1.5 py-1 text-[10px] font-semibold text-slate-300 transition hover:border-amber-500/50 ${ring(highlight === 'probe')}`}
           >
             🕵️ Run security probe
             {breached.length > 0 && (
@@ -183,7 +191,7 @@ export function SandboxPanel() {
             running
               ? 'bg-gradient-to-r from-rose-500 to-orange-500 shadow-rose-500/25 hover:brightness-110'
               : 'bg-gradient-to-r from-cyan-500 to-indigo-500 shadow-cyan-500/25 hover:brightness-110'
-          }`}
+          } ${ring(highlight === 'run')}`}
         >
           {running ? '■ Stop' : '▶ Run'}
         </button>
@@ -197,6 +205,14 @@ export function SandboxPanel() {
       </div>
       {!running && !usersConnected && (
         <p className="-mt-1 text-center text-[11px] text-slate-500">Connect Users to something to run.</p>
+      )}
+      {!tourActive && (
+        <button
+          onClick={startTour}
+          className="w-full text-center text-[11px] text-cyan-400 transition hover:text-cyan-300"
+        >
+          🎓 Replay the sandbox tour
+        </button>
       )}
     </div>
   )
