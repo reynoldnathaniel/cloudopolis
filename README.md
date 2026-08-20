@@ -142,6 +142,31 @@ fire the security probe. Replay it any time from the sandbox panel.
 
 ---
 
+## Testing
+
+Two layers, deliberately split:
+
+- **`npm test`** — Vitest over the pure engine. Every level's intended solution is pinned to
+  its star rating and its exact monthly cost, and every classic wrong design is pinned to the
+  failure it's supposed to teach. Runs in ~150 ms, so it's the fast feedback loop for any
+  tuning change in `services.ts`, `scenarios.ts`, or `engine.ts`.
+- **`npm run test:e2e`** — Playwright drives a real Chromium through the journeys a player
+  actually clicks: menu → tutorial → build a design by dragging edges between node handles →
+  run the full ~15 s simulation → three stars → expand the timeline → author a scenario →
+  the sandbox's endless run. It runs against a **production build** on `vite preview`, so it
+  tests exactly what deploys. ~60 seconds.
+
+First time only, fetch the browser binary:
+
+```bash
+npx playwright install chromium
+```
+
+`scripts/deploy.sh` runs both before it uploads anything. To bypass the slow layer in a
+pinch: `SKIP_E2E=1 ./scripts/deploy.sh`.
+
+---
+
 ## Deploying to S3 + CloudFront
 
 The game is a static SPA, so it deploys as… the Level 1 architecture from the game itself:

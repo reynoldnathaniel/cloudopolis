@@ -13,6 +13,17 @@ export AWS_PROFILE="${AWS_PROFILE:-mzc-dev}"
 
 cd "$(dirname "$0")/.."
 
+echo "▶ Running engine tests…"
+npm test
+
+if [ "${SKIP_E2E:-}" = "1" ]; then
+  echo "▶ Skipping smoke suite (SKIP_E2E=1)"
+else
+  # Builds and previews the app itself, so this also proves the build is good.
+  echo "▶ Running smoke suite…"
+  npm run test:e2e
+fi
+
 echo "▶ Building…"
 npm run build
 
