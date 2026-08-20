@@ -101,6 +101,19 @@ style you want to learn.
   Drain** instead of instant service.
 - **VPC, Availability Zone, and Region containers** — React Flow subflows with drag re-parenting.
 
+### Getting unstuck
+
+Fail the same scenario twice and the results modal offers **📖 Reveal a 3-star answer**: it
+replaces your canvas (after confirming) with a reference design, then explains in three lines
+why that design works — what each piece absorbs, what it costs, and which wrong turn it avoids.
+Run it straight away and watch every pillar go green.
+
+The reference designs live as data in [`src/game/solutions.ts`](src/game/solutions.ts), and
+`solutions.test.ts` replays **every one of them through the real engine, over the real phase
+script, scored by the real star rules**, asserting three stars. A rebalance that leaves a
+reference answer short of full marks fails the test gate before it can ship — so the game can
+never hand out an answer that doesn't actually work.
+
 ### The scenario editor
 
 The 🛠️ **My Scenarios** track has a full in-game editor: write the story, set the
@@ -168,13 +181,15 @@ Two layers, deliberately split:
 
 - **`npm test`** — Vitest over the pure engine. Every level's intended solution is pinned to
   its star rating and its exact monthly cost, and every classic wrong design is pinned to the
-  failure it's supposed to teach. Runs in ~150 ms, so it's the fast feedback loop for any
-  tuning change in `services.ts`, `scenarios.ts`, or `engine.ts`.
+  failure it's supposed to teach. Every shipped reference answer is replayed through the full
+  phase script and must score three stars. Runs in ~150 ms, so it's the fast feedback loop for
+  any tuning change in `services.ts`, `scenarios.ts`, or `engine.ts`.
 - **`npm run test:e2e`** — Playwright drives a real Chromium through the journeys a player
   actually clicks: menu → tutorial → build a design by dragging edges between node handles →
   run the full ~15 s simulation → three stars → expand the timeline → author a scenario →
-  the sandbox's endless run → a Region going dark behind Route 53. It runs against a
-  **production build** on `vite preview`, so it tests exactly what deploys. ~2 minutes.
+  the sandbox's endless run → a Region going dark behind Route 53 → failing a level twice and
+  taking the reference answer. It runs against a **production build** on `vite preview`, so it
+  tests exactly what deploys. ~3 minutes.
 
 First time only, fetch the browser binary:
 
@@ -234,6 +249,8 @@ src/
     scenarios.ts    # tracks + scenario definitions (pure data)
     engine.ts       # tick-based simulation, scoring, security audit
     engine.test.ts  # balance tests: every intended solution pinned to its stars
+    solutions.ts    # the reference 3-star answer for each scenario, as data
+    solutions.test.ts # replays every one of them and asserts three stars
     tutorial.ts     # the guided tutorial as data
   components/
     ServiceNode.tsx    # canvas nodes (+ the Users node)
@@ -263,7 +280,6 @@ replaying the level by hand.
 - WAF + DDoS event, extending the security probe into a scenario of its own
 - EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
 - Lambda cold starts · RDS read replicas · mid-run decision events
-- "Show me a 3-star answer" solution reveal after a few failed runs
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---

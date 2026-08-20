@@ -38,6 +38,9 @@ export function ResultsModal() {
   const results = useGameStore((s) => s.results)
   const nodes = useGameStore((s) => s.nodes)
   const [shot, setShot] = useState<'idle' | 'working' | 'done'>('idle')
+  const [confirmReveal, setConfirmReveal] = useState(false)
+  const canReveal = useGameStore((s) => s.canRevealSolution())
+  const revealSolution = useGameStore((s) => s.revealSolution)
   const { getNodesBounds } = useReactFlow()
   const phase = useGameStore((s) => s.phase)
   const backToEdit = useGameStore((s) => s.backToEdit)
@@ -181,6 +184,42 @@ export function ResultsModal() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {/* Offered only after this scenario has been failed twice. The
+                design it drops in is pinned to three stars by solutions.test.ts. */}
+            {canReveal && results.stars < 3 && (
+              <div className="mt-4 rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-3">
+                {confirmReveal ? (
+                  <>
+                    <div className="text-[11px] leading-snug text-slate-300">
+                      This replaces everything on your canvas with a reference design that scores
+                      three stars. Your current layout will be gone.
+                    </div>
+                    <div className="mt-2.5 flex gap-2">
+                      <button
+                        onClick={revealSolution}
+                        className="flex-1 rounded-lg bg-indigo-500 px-3 py-1.5 text-[12px] font-bold text-white transition hover:brightness-110"
+                      >
+                        Show me
+                      </button>
+                      <button
+                        onClick={() => setConfirmReveal(false)}
+                        className="rounded-lg border border-slate-600 px-3 py-1.5 text-[12px] font-semibold text-slate-300 transition hover:border-slate-400"
+                      >
+                        Keep mine
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirmReveal(true)}
+                    className="w-full text-left text-[12px] font-semibold text-indigo-300 transition hover:text-indigo-200"
+                  >
+                    📖 Stuck? Reveal a 3-star answer
+                  </button>
+                )}
               </div>
             )}
 

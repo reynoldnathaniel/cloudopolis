@@ -25,6 +25,8 @@ export function ScenarioPanel() {
   const openSelect = useGameStore((s) => s.openSelect)
   const openBriefing = useGameStore((s) => s.openBriefing)
   const bestStars = useGameStore((s) => s.bestStars)
+  const canReveal = useGameStore((s) => s.canRevealSolution())
+  const revealSolution = useGameStore((s) => s.revealSolution)
   const highlight = useTutorialHighlight()
 
   const track = TRACKS.find((t) => t.id === scenario.track)
@@ -109,6 +111,18 @@ export function ScenarioPanel() {
         >
           📖 Read the full briefing
         </button>
+
+        {/* Unlocked by two short runs; hidden again once they've three-starred it. */}
+        {canReveal && earned < 3 && editing && (
+          <button
+            onClick={() => {
+              if (window.confirm('Replace your canvas with a reference 3-star design?')) revealSolution()
+            }}
+            className="mt-2 w-full rounded-lg border border-indigo-500/40 px-3 py-1.5 text-[12px] font-medium text-indigo-300 transition hover:border-indigo-400 hover:bg-indigo-500/10"
+          >
+            📖 Reveal a 3-star answer
+          </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between rounded-lg border border-slate-700/70 bg-slate-800/40 px-3 py-2">

@@ -27,6 +27,7 @@ import { getScenario, SANDBOX_ID, type Scenario } from './game/scenarios'
 // Importing this module also loads + registers saved custom scenarios, so it
 // must stay above the saved-game validation below (imports run before body).
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
+import { SOLUTIONS, hasSolution, REVEAL_AFTER_FAILURES } from './game/solutions'
 import { TUTORIAL_STEPS } from './game/tutorial'
 import { SANDBOX_TUTORIAL_STEPS } from './game/sandboxTutorial'
 
@@ -104,6 +105,11 @@ interface GameStore {
   breachedNodeIds: string[]
   /** Best star count earned per scenario id (persisted) */
   bestStars: Record<string, number>
+  /** Completed runs that fell short of 3 stars, per scenario id (persisted).
+   *  Two of them unlock the reference-answer reveal. */
+  failedRuns: Record<string, number>
+  /** Notes from a revealed solution, shown until dismissed; null when none is showing */
+  solutionNotes: string[] | null
   /** Player finished the tutorial at least once (persisted) */
   tutorialDone: boolean
   /** Mission briefing overlay is open */
@@ -171,6 +177,11 @@ interface GameStore {
   assignZone: (nodeId: string, az: AzId | null, position: { x: number; y: number }) => void
   /** Re-parent a node into a Region box (or out of both). Position is relative to the new parent. */
   assignRegion: (nodeId: string, region: RegionId | null, position: { x: number; y: number }) => void
+  /** Has this scenario been failed enough times to offer its reference answer? */
+  canRevealSolution: () => boolean
+  /** Replace the canvas with the scenario's reference 3-star design. Destructive. */
+  revealSolution: () => void
+  dismissSolutionNotes: () => void
   startRun: () => void
   /** Freeze / unfreeze the running simulation */
   togglePause: () => void
@@ -277,6 +288,7 @@ interface SaveData {
   nodes?: Node[]
   edges?: Edge[]
   bestStars?: Record<string, number>
+  failedRuns?: Record<string, number>
   tutorialDone?: boolean
   sandboxTutorialDone?: boolean
   briefingSeen?: string[]
@@ -334,6 +346,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   deadNodeIds: [],
   breachedNodeIds: [],
   bestStars: SAVED.bestStars ?? {},
+  failedRuns: SAVED.failedRuns ?? {},
+  solutionNotes: null,
   tutorialDone: SAVED.tutorialDone === true,
   briefingOpen: false,
   briefingSeen: Array.isArray(SAVED.briefingSeen) ? SAVED.briefingSeen : [],
@@ -480,9 +494,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const next = get().customScenarios.filter((s) => s.id !== id)
     setCustomScenarios(next)
     const { [id]: _gone, ...bestStars } = get().bestStars
+    const { [id]: _alsoGone, ...failedRuns } = get().failedRuns
     set({
       customScenarios: next,
       bestStars,
+      failedRuns,
       briefingSeen: get().briefingSeen.filter((b) => b !== id),
     })
     if (get().scenarioId === id) get().selectScenario('static-site')
@@ -536,6 +552,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       struckRegion: null,
       deadNodeIds: [],
       breachedNodeIds: [],
+      solutionNotes: null,
     })
   },
 
@@ -634,6 +651,66 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       }),
     })
   },
+
+  canRevealSolution: () => {
+    const { scenarioId, failedRuns } = get()
+    return hasSolution(scenarioId) && (failedRuns[scenarioId] ?? 0) >= REVEAL_AFTER_FAILURES
+  },
+
+  revealSolution: () => {
+    const scenarioId = get().scenarioId
+    const solution = SOLUTIONS[scenarioId]
+    if (!solution) return
+    get().stopRun()
+
+    const scenario = getScenario(scenarioId)
+    // Solution nodes carry container-relative positions, so the parent boxes
+    // have to come from a clean canvas rather than whatever the player left.
+    const base = initialNodesFor(scenario)
+
+    const idOf = (key: string) => (key === 'users' ? 'users' : `sol-${key}`)
+    const nodes: Node[] = solution.nodes.map((n) => {
+      const node: Node = {
+        id: idOf(n.key),
+        type: 'service',
+        position: { x: n.x, y: n.y },
+        data: { serviceId: n.serviceId } as Record<string, unknown>,
+      }
+      if (n.az) {
+        node.parentId = `az-${n.az}`
+        node.data = { serviceId: n.serviceId, az: n.az }
+      } else if (n.region) {
+        node.parentId = `region-${n.region}`
+        node.data = { serviceId: n.serviceId, region: n.region }
+      }
+      return node
+    })
+    const edges: Edge[] = solution.edges.map(([from, to]) => ({
+      id: `sol-${from}-${to}`,
+      source: idOf(from),
+      target: idOf(to),
+      type: 'traffic',
+    }))
+
+    set({
+      nodes: [...base, ...nodes],
+      edges,
+      phase: 'edit',
+      results: null,
+      nodeStats: {},
+      edgeFlows: {},
+      currentRps: 0,
+      monthlyCost: 0,
+      liveSuccess: 1,
+      deadNodeIds: [],
+      struckAz: null,
+      struckRegion: null,
+      breachedNodeIds: [],
+      solutionNotes: solution.notes,
+    })
+  },
+
+  dismissSolutionNotes: () => set({ solutionNotes: null }),
 
   startRun: () => {
     const state = get()
@@ -960,6 +1037,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
               ...get().bestStars,
               [scenario.id]: Math.max(get().bestStars[scenario.id] ?? 0, stars),
             },
+            // Only completed runs count, and only short ones. Two of these
+            // unlock the reference answer for this scenario.
+            failedRuns:
+              stars === 3
+                ? get().failedRuns
+                : { ...get().failedRuns, [scenario.id]: (get().failedRuns[scenario.id] ?? 0) + 1 },
             results: {
               stars,
               mode: isAsync ? ('async' as const) : ('sync' as const),
@@ -1067,6 +1150,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       struckAz: null,
       struckRegion: null,
       breachedNodeIds: [],
+      solutionNotes: null,
     })
   },
 }))
@@ -1087,6 +1171,7 @@ useGameStore.subscribe(() => {
           nodes: s.nodes,
           edges: s.edges,
           bestStars: s.bestStars,
+          failedRuns: s.failedRuns,
           tutorialDone: s.tutorialDone,
           sandboxTutorialDone: s.sandboxTutorialDone,
           briefingSeen: s.briefingSeen,

@@ -160,6 +160,52 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ $113/mo')).toBeVisible()
   })
 
+  test('two failed runs unlock the reference answer, which then three-stars', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    // A bare public bucket: fails the spike and the probe, every time.
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+    await connect(page, '.react-flow__node[data-id="users"]', '.react-flow__node[data-id^="s3"]')
+
+    // A dismissed results modal lingers in the DOM at opacity 0, and Playwright
+    // counts that as visible — so "the run finished" has to be anchored on the
+    // sidebar button, not on anything inside the modal.
+    const runToCompletion = async () => {
+      await page.getByRole('button', { name: /Simulate/ }).click()
+      await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 45_000 })
+    }
+
+    // Run 1: short of three stars, but one failure leaves the offer locked.
+    await runToCompletion()
+    await expect(page.getByRole('button', { name: /Stuck\? Reveal/ })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Refine design' }).last().click()
+    await expect(page.getByRole('button', { name: /Reveal a 3-star answer/ })).toHaveCount(0)
+
+    // Run 2: the second failure unlocks it.
+    await runToCompletion()
+    const offer = page.getByRole('button', { name: /Stuck\? Reveal/ })
+    await expect(offer).toBeVisible()
+
+    // It asks before destroying your canvas.
+    await offer.click()
+    await expect(page.getByText(/Your current layout will be gone/)).toBeVisible()
+    await page.getByRole('button', { name: 'Show me' }).click()
+
+    // The reference design replaces the canvas, and explains itself.
+    await expect(page.getByText(/Reference answer · Launch Day/i)).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="sol-cloudfront"]')).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="sol-s3"]')).toBeVisible()
+
+    // And it actually earns the three stars it promises.
+    await page.getByRole('button', { name: /Run the reference design/ }).click()
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 45_000 })
+    await expect(page.getByText('Well-Architected!')).toBeVisible()
+    await expect(page.getByText('✓ $15/mo')).toBeVisible()
+  })
+
   test('the run timeline expands and closes', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /Launch Day/ }).click()
