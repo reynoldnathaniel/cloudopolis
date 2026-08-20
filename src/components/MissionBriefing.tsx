@@ -89,6 +89,12 @@ export function MissionBriefing() {
                     and the backlog must drain by run end
                   </MissionLine>
                 )}
+                {scenario.writeFraction !== undefined && (
+                  <MissionLine icon="✍️">
+                    <b className="text-violet-300">{Math.round(scenario.writeFraction * 100)}%</b> of
+                    that traffic is writes — the rest is reads, and the two do not scale the same way
+                  </MissionLine>
+                )}
                 {scenario.hasOutage && scenario.multiRegion && (
                   <MissionLine icon="🌑">
                     Survive the loss of an entire <b className="text-fuchsia-300">AWS Region</b> —

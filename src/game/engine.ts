@@ -146,6 +146,10 @@ export function simulateTick(
     return SERVICES[n.serviceId].capacity
   }
 
+  // A read replica is a copy of something. With no primary in the design there
+  // is nothing to replicate, so the replicas serve nothing at all.
+  const hasRdsPrimary = nodes.some((n) => n.serviceId === 'rds')
+
   // Same "you didn't put it anywhere" failure, one level of the hierarchy apart.
   const placementIssue = scenario.multiRegion === true ? 'needs-region' : 'needs-az'
   for (const n of nodes) {
@@ -353,8 +357,30 @@ export function simulateTick(
             } else if (healthyApp.length === 0) {
               dropped += p
               issues.add('db-unavailable')
-            } else {
+            } else if (scenario.writeFraction === undefined) {
               forward(p, healthyApp, true)
+            } else {
+              // Levels that model a read/write split route the two apart, the
+              // way a reader endpoint does: reads fan out over the replicas if
+              // there are any, and every write goes to a primary or nowhere.
+              const readers = healthyApp.filter(
+                (e) => SERVICES[nodeById.get(e.target)!.serviceId].readsOnly === true,
+              )
+              const writers = healthyApp.filter(
+                (e) => SERVICES[nodeById.get(e.target)!.serviceId].readsOnly !== true,
+              )
+              const writes = p * scenario.writeFraction
+              const reads = p - writes
+
+              if (writers.length === 0) {
+                dropped += writes
+                issues.add('writes-need-primary')
+              } else {
+                forward(writes, writers, true)
+              }
+              // No replicas wired? Reads fall back to the primary, which is
+              // exactly the design this level is trying to break.
+              forward(reads, readers.length > 0 ? readers : writers, true)
             }
           }
         } else {
@@ -438,6 +464,14 @@ export function simulateTick(
         break
       }
       case 'db': {
+        if (def.readsOnly === true && !hasRdsPrimary) {
+          if (L > 1) {
+            dropped += L
+            issues.add('replica-no-primary')
+          }
+          nodeLoads[id] = { inRps: L, processed: 0, capacity: def.capacity, util: 0 }
+          break
+        }
         const legit = Math.min(appIn[id], L)
         const direct = L - legit
         if (direct > 1) {
@@ -577,6 +611,10 @@ export const ISSUE_TIPS: Record<string, string> = {
   'static-cant-dynamic': 'S3 can only serve files — it cannot run application logic. This app needs a compute tier (EC2 or Lambda).',
   'compute-no-db': 'Your compute tier has no database or model behind it, so dynamic requests are failing. Connect it onward.',
   'db-overloaded': 'Your database saturated. Put ElastiCache in front to absorb reads, or spread the load across more databases.',
+  'writes-need-primary':
+    'Replicas answer reads and refuse writes, so your writes had nowhere to go. Keep the RDS primary in the design — replicas scale reads out, they do not replace the one writer.',
+  'replica-no-primary':
+    'A read replica is a streaming copy of a primary, and there is no primary here to copy from. Add the RDS instance the replicas read from.',
   'db-direct-access': 'Users cannot query a database or model directly. Put a compute tier (EC2 or Lambda) in front of it.',
   'cache-direct': 'A cache sits behind your compute tier, not in front of it. Route traffic compute → cache → database.',
   'cache-no-db': 'A cache needs somewhere to send its misses. Connect it onward to a database or model.',
@@ -619,11 +657,34 @@ const REGION_TIPS: Record<string, string> = {
     'Everything behind your entry point lived in the failed Region. Each Region needs a complete stack — router, compute, and data — and Route 53 choosing between them.',
 }
 
-export function tipsForIssues(issues: string[], opts?: { multiRegion?: boolean }): string[] {
-  const base = opts?.multiRegion === true ? { ...ISSUE_TIPS, ...REGION_TIPS } : ISSUE_TIPS
+/**
+ * Levels with a read/write split need their own saturation advice: the stock
+ * answer is "put a cache in front", and these levels are precisely the ones
+ * where that is off the table.
+ */
+const SPLIT_TIPS: Record<string, string> = {
+  'db-overloaded':
+    'Your primary saturated under read traffic. Reads are what replicas are for — route them to enough replicas and the primary is left doing only the writes.',
+  'overloaded:RDS':
+    'The RDS primary saturated. In a read-heavy app it should be handling little more than the writes; every read it serves is a read a replica could have taken.',
+  'overloaded:RDS Replica':
+    'Your replicas saturated — there are not enough of them for peak reads. Each one handles 250 rps, so size the fleet for the spike, not the baseline.',
+}
+
+export function tipsForIssues(
+  issues: string[],
+  opts?: { multiRegion?: boolean; writeSplit?: boolean },
+): string[] {
+  const base = {
+    ...ISSUE_TIPS,
+    ...(opts?.multiRegion === true ? REGION_TIPS : {}),
+    ...(opts?.writeSplit === true ? SPLIT_TIPS : {}),
+  }
   const tips: string[] = []
   for (const issue of issues) {
-    if (issue.startsWith('overloaded:')) {
+    if (base[issue]) {
+      tips.push(base[issue])
+    } else if (issue.startsWith('overloaded:')) {
       const name = issue.split(':')[1]
       // Elastic fleets saturate transiently while units start — that's the
       // mechanic working, not a design flaw, so never tell them to "switch to
@@ -635,8 +696,6 @@ export function tipsForIssues(issues: string[], opts?: { multiRegion?: boolean }
             ? `${name} saturated while the fleet was still scaling up — ${def.scaling.unitLabel} take time to start. Raising the minimum absorbs sharper spikes.`
             : `${name} hit 100% utilization and started dropping requests. Add more instances, or switch to a service that auto-scales.`),
       )
-    } else if (base[issue]) {
-      tips.push(base[issue])
     }
   }
   return [...new Set(tips)]

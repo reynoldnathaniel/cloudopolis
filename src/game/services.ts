@@ -69,6 +69,11 @@ export interface ServiceDef {
   bufferSize?: number
   /** May sit directly on the internet edge without failing the security probe */
   edgeSafe?: boolean
+  /**
+   * Serves reads but never writes. Only meaningful in scenarios that declare a
+   * `writeFraction`; elsewhere it behaves as an ordinary data store.
+   */
+  readsOnly?: boolean
   blurb: string
 }
 
@@ -252,6 +257,22 @@ export const SERVICES: Record<string, ServiceDef> = {
     zonal: true,
     blurb: 'Managed PostgreSQL/MySQL. Powerful but a fixed-size instance — saturates around 250 RPS.',
   },
+  'rds-replica': {
+    id: 'rds-replica',
+    name: 'RDS Replica',
+    fullName: 'Amazon RDS read replica',
+    abbr: 'RR',
+    category: 'database',
+    role: 'db',
+    monthlyCost: 40,
+    costPerRps: 0,
+    capacity: 250,
+    autoScales: false,
+    zonal: true,
+    readsOnly: true,
+    blurb:
+      'A streaming copy of your RDS primary that answers reads and nothing else. Add replicas to scale reads out — but every write still has exactly one place to land, and a replica is useless without a primary to copy from.',
+  },
   dynamodb: {
     id: 'dynamodb',
     name: 'DynamoDB',
@@ -384,7 +405,10 @@ export interface PaletteGroup {
 export const PALETTE_GROUPS: PaletteGroup[] = [
   { label: 'Edge & Network', items: [SERVICES.route53, SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
   { label: 'Compute', items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda] },
-  { label: 'Data', items: [SERVICES.s3, SERVICES.rds, SERVICES.dynamodb, SERVICES.elasticache] },
+  {
+    label: 'Data',
+    items: [SERVICES.s3, SERVICES.rds, SERVICES['rds-replica'], SERVICES.dynamodb, SERVICES.elasticache],
+  },
   { label: 'Messaging & Streaming', items: [SERVICES.sqs, SERVICES.sns, SERVICES.kinesis] },
   { label: 'AI', items: [SERVICES.opensearch, SERVICES.bedrock, SERVICES.sagemaker] },
 ]

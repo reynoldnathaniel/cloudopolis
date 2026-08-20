@@ -2,6 +2,7 @@ export type TrackId =
   | 'foundations'
   | 'containers'
   | 'genai'
+  | 'data'
   | 'event-driven'
   | 'streaming'
   | 'global'
@@ -32,6 +33,12 @@ export const TRACKS: Track[] = [
     name: 'GenAI',
     emoji: '🤖',
     description: 'LLM apps on Bedrock: quotas, token costs, and semantic caching.',
+  },
+  {
+    id: 'data',
+    name: 'Data',
+    emoji: '🗄️',
+    description: 'Relational data at scale: read/write splits, replicas, and the one primary every write must reach.',
   },
   {
     id: 'event-driven',
@@ -75,6 +82,12 @@ export interface Scenario {
   need: 'static' | 'app'
   /** Async pipeline: scored on eventual delivery + durability + drain instead of instant service. */
   async?: boolean
+  /**
+   * Fraction of app-tier traffic that is writes (0.1 = 10%). Setting this turns
+   * on the read/write split: writes only reach services that accept them, reads
+   * fan out over read replicas when any are wired.
+   */
+  writeFraction?: number
   baselineRps: number
   spikeRps: number
   spikeLabel: string
@@ -292,6 +305,35 @@ export const SCENARIOS: Scenario[] = [
       'Retrieval grounds a request; it never answers one. OpenSearch must hand off to the model behind it.',
       'Every request that reaches the model costs tokens and eats the 150 RPS quota — and the spike is 450.',
       'A semantic cache in front of the chain answers repeats outright. Only the misses need retrieving and generating.',
+    ],
+  },
+  // ---------------------------------------------------------------- Data
+  {
+    id: 'the-feed',
+    track: 'data',
+    order: 1,
+    difficulty: 2,
+    title: 'The Feed',
+    emoji: '📰',
+    hook: 'Ninety percent reads, one primary. Do the arithmetic.',
+    brief:
+      'Your news app is a firehose of reading and a trickle of writing: for every post someone publishes, nine hundred people scroll past it. Compliance keeps the data relational, and after the stale-timeline incident last quarter the CTO has banned caching outright — "there are only two hard things in computer science, and we have done one of them to ourselves already". Scale the reads the other way.',
+    need: 'app',
+    baselineRps: 500,
+    spikeRps: 1000,
+    spikeLabel: '📰 Breaking news — everyone refreshes at once!',
+    budget: 320,
+    hasProbe: true,
+    // 10% writes: the whole level lives in the gap between this and the reads.
+    writeFraction: 0.1,
+    banned: ['dynamodb', 'elasticache'],
+    bannedReason:
+      'Compliance keeps this relational, and the CTO banned the cache layer after the stale-timeline incident.',
+    requiredServices: ['rds-replica'],
+    goalHints: [
+      'One RDS instance handles 250 rps of anything. At the spike you have ~900 reads a second — that is not a primary-sized problem.',
+      'Each read replica takes 250 rps of reads and costs $40. Size them for the peak, not the average: replicas do not auto-scale.',
+      'Replicas answer reads and refuse writes, and they need a primary to copy from. Keep the RDS instance in the design — it is where every write still lands.',
     ],
   },
   // ---------------------------------------------------------- Event-Driven

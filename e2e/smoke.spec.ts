@@ -72,7 +72,7 @@ test.describe('SimCloud smoke', () => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await expect(page.getByRole('heading', { name: 'Choose your scenario' })).toBeVisible()
 
-    for (const track of ['Foundations', 'Containers', 'GenAI', 'Event-Driven', 'Streaming', 'Going Global', 'My Scenarios']) {
+    for (const track of ['Foundations', 'Containers', 'GenAI', 'Data', 'Event-Driven', 'Streaming', 'Going Global', 'My Scenarios']) {
       await expect(page.getByRole('heading', { name: new RegExp(track) })).toBeVisible()
     }
     for (const title of ['Launch Day', 'PhotoShare', 'IPO Day', 'Prompt Rush', 'Grounded', 'Order Storm', 'Click Stream']) {
@@ -158,6 +158,52 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
     await expect(page.getByText('survive the Region failure (≥95%)')).toBeVisible()
     await expect(page.getByText('✓ $113/mo')).toBeVisible()
+  })
+
+  test('The Feed: reads go to the replicas, writes to the one primary', async ({ page }) => {
+    // Arrive with the reveal already earned — the unlock rule has its own test.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'simcloud-save-v1',
+        JSON.stringify({ failedRuns: { 'the-feed': 2 }, tutorialDone: true }),
+      )
+    })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /The Feed/ }).click()
+
+    await expect(page.getByRole('heading', { level: 2, name: 'The Feed' })).toBeVisible()
+    await expect(page.getByText(/of that traffic is writes/)).toBeVisible()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    // The new service is reachable from the palette. "Amazon RDS (" is what
+    // separates the primary from "Amazon RDS read replica".
+    await expect(palette(page, 'Amazon RDS read replica')).toBeVisible()
+    await palette(page, 'Amazon RDS (').click()
+    await palette(page, 'Amazon RDS read replica').click()
+    await expect(node(page, 'rds-replica')).toBeVisible()
+
+    // Hand-wiring five data nodes is a coin flip in a headless browser — they
+    // auto-place at random points and overlap — so take the reference design,
+    // whose positions are fixed, and check the mechanic on it instead.
+    await page.getByRole('button', { name: /Reveal a 3-star answer/ }).click()
+    await page.getByRole('button', { name: 'Show me' }).click()
+    await page.getByRole('button', { name: /Run the reference design/ }).click()
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 60_000 })
+
+    await expect(page.getByText('Well-Architected!')).toBeVisible()
+    await expect(page.getByText('✓ $280/mo')).toBeVisible()
+    await expect(page.getByText('✓ complete')).toBeVisible()
+
+    // The split itself, read off the canvas at the last baseline tick: 10% of
+    // 500 rps lands on the primary, and the other 450 spread over 4 replicas.
+    const rpsIn = async (id: string) => {
+      const text = await page.locator(`.react-flow__node[data-id="${id}"]`).innerText()
+      return Number(/(\d+) rps in/.exec(text)?.[1] ?? -1)
+    }
+    expect(await rpsIn('sol-rds')).toBe(50)
+    expect(await rpsIn('sol-rr-1')).toBe(113)
   })
 
   test('two failed runs unlock the reference answer, which then three-stars', async ({ page }) => {

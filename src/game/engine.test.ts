@@ -10,6 +10,7 @@ import {
   blueprintMissing,
   nextFleetCount,
   fleetMin,
+  tipsForIssues,
   type LiteNode,
   type LiteEdge,
   type TickStats,
@@ -820,5 +821,101 @@ describe('Going Global: The Blackout (blackout)', () => {
     expect(SERVICES.route53.global).toBe(true)
     expect(SERVICES.cloudfront.global).toBe(true)
     expect(SERVICES.alb.global).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------- Data: The Feed
+
+describe('Data: The Feed (the-feed)', () => {
+  const sc = getScenario('the-feed')
+
+  /** ALB → Fargate → one primary + N read replicas. */
+  const design = (replicas: number, compute = 'fargate') => {
+    const nodes = [N('users', 'users'), N('lb', 'alb'), N('app', compute), N('rds', 'rds')]
+    const edges = [E('users', 'lb'), E('lb', 'app'), E('app', 'rds')]
+    for (let i = 1; i <= replicas; i++) {
+      nodes.push(N(`rr-${i}`, 'rds-replica'))
+      edges.push(E('app', `rr-${i}`))
+    }
+    return { nodes, edges }
+  }
+
+  it('splits traffic 10/90: the primary takes only the writes', () => {
+    const { nodes, edges } = design(4)
+    const s = steady(nodes, edges, 1000, sc.id).stats
+    expect(s.nodeLoads['rds'].processed).toBeCloseTo(100, 5)
+    // 900 reads spread evenly over four replicas.
+    for (let i = 1; i <= 4; i++) expect(s.nodeLoads[`rr-${i}`].processed).toBeCloseTo(225, 5)
+    expect(rate(s)).toBeGreaterThan(0.99)
+  })
+
+  it('four replicas carry the spike at $280/mo', () => {
+    const { nodes, edges } = design(4)
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(base)).toBeGreaterThan(0.99)
+    expect(rate(steady(nodes, edges, sc.spikeRps, sc.id).stats)).toBeGreaterThan(0.99)
+    const cost = estimateMonthlyCost(nodes, base.nodeLoads)
+    expect(cost).toBe(280)
+    expect(cost).toBeLessThanOrEqual(sc.budget)
+    expect(securityAudit(nodes, edges)).toHaveLength(0)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.nodeLoads)).toHaveLength(0)
+  })
+
+  it('three replicas look fine at baseline and miss the bar at the spike', () => {
+    const { nodes, edges } = design(3)
+    expect(rate(steady(nodes, edges, sc.baselineRps, sc.id).stats)).toBeGreaterThan(0.99)
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id).stats
+    expect(rate(spike)).toBeCloseTo(0.85, 2)
+    expect(rate(spike)).toBeLessThan(0.95)
+    expect(spike.issues).toContain('overloaded:RDS Replica')
+  })
+
+  it('a lone primary is crushed by reads — the problem the level poses', () => {
+    const { nodes, edges } = design(0)
+    const spike = steady(nodes, edges, sc.spikeRps, sc.id).stats
+    expect(rate(spike)).toBeCloseTo(0.25, 2)
+    expect(spike.issues).toContain('overloaded:RDS')
+  })
+
+  it('replicas without a primary serve nothing, and lose every write', () => {
+    const nodes = [N('users', 'users'), N('lb', 'alb'), N('app', 'fargate'), N('rr-1', 'rds-replica')]
+    const edges = [E('users', 'lb'), E('lb', 'app'), E('app', 'rr-1')]
+    const s = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    expect(rate(s)).toBe(0)
+    expect(s.issues).toContain('replica-no-primary')
+    expect(s.issues).toContain('writes-need-primary')
+  })
+
+  it('serving the reads off extra primaries works but fails the blueprint', () => {
+    const nodes = [N('users', 'users'), N('lb', 'alb'), N('app', 'fargate')]
+    const edges = [E('users', 'lb'), E('lb', 'app')]
+    for (let i = 1; i <= 4; i++) {
+      nodes.push(N(`db-${i}`, 'rds'))
+      edges.push(E('app', `db-${i}`))
+    }
+    const base = steady(nodes, edges, sc.baselineRps, sc.id).stats
+    // It does carry the traffic — the engine models neither the write conflicts
+    // nor the sharding you would actually need, so the level rules it out by
+    // requiring a replica rather than by melting it.
+    expect(rate(steady(nodes, edges, sc.spikeRps, sc.id).stats)).toBeGreaterThan(0.99)
+    expect(estimateMonthlyCost(nodes, base.nodeLoads)).toBeGreaterThan(280)
+    expect(blueprintMissing(sc.requiredServices, nodes, base.nodeLoads)).toEqual(['rds-replica'])
+  })
+
+  it('the read/write split stays off in every other scenario', () => {
+    // photo-app has no writeFraction, so a replica there is just another store.
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('fn', 'lambda'), N('rds', 'rds'), N('rr', 'rds-replica')]
+    const edges = [E('users', 'gw'), E('gw', 'fn'), E('fn', 'rds'), E('fn', 'rr')]
+    const s = steady(nodes, edges, 200, 'photo-app').stats
+    expect(s.nodeLoads['rds'].processed).toBeCloseTo(100, 5)
+    expect(s.nodeLoads['rr'].processed).toBeCloseTo(100, 5)
+  })
+
+  it('saturation advice avoids the cache the level bans', () => {
+    const tips = tipsForIssues(['db-overloaded', 'overloaded:RDS'], { writeSplit: true })
+    expect(tips.join(' ')).not.toContain('ElastiCache')
+    expect(tips.join(' ')).toContain('replica')
+    // ...and the stock advice is untouched everywhere else.
+    expect(tipsForIssues(['db-overloaded']).join(' ')).toContain('ElastiCache')
   })
 })

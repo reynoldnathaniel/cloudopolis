@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { TRACKS } from '../game/scenarios'
 import { SERVICES } from '../game/services'
 import { ICONS } from '../game/icons'
@@ -27,6 +28,7 @@ export function ScenarioPanel() {
   const bestStars = useGameStore((s) => s.bestStars)
   const canReveal = useGameStore((s) => s.canRevealSolution())
   const revealSolution = useGameStore((s) => s.revealSolution)
+  const [confirmReveal, setConfirmReveal] = useState(false)
   const highlight = useTutorialHighlight()
 
   const track = TRACKS.find((t) => t.id === scenario.track)
@@ -84,6 +86,9 @@ export function ScenarioPanel() {
               {scenario.multiRegion ? '🌑 Region outage' : '💥 AZ outage'}
             </Chip>
           )}
+          {scenario.writeFraction !== undefined && (
+            <Chip tone="text-violet-300">✍️ {Math.round(scenario.writeFraction * 100)}% writes</Chip>
+          )}
           {scenario.hasProbe && <Chip tone="text-amber-300">🕵️ probe</Chip>}
         </div>
 
@@ -112,16 +117,42 @@ export function ScenarioPanel() {
           📖 Read the full briefing
         </button>
 
-        {/* Unlocked by two short runs; hidden again once they've three-starred it. */}
+        {/* Unlocked by two short runs; hidden again once they've three-starred it.
+            Confirms inline rather than through window.confirm, matching the
+            results modal — a native dialog is jarring here, and unclickable to
+            anything driving the page. */}
         {canReveal && earned < 3 && editing && (
-          <button
-            onClick={() => {
-              if (window.confirm('Replace your canvas with a reference 3-star design?')) revealSolution()
-            }}
-            className="mt-2 w-full rounded-lg border border-indigo-500/40 px-3 py-1.5 text-[12px] font-medium text-indigo-300 transition hover:border-indigo-400 hover:bg-indigo-500/10"
-          >
-            📖 Reveal a 3-star answer
-          </button>
+          confirmReveal ? (
+            <div className="mt-2 rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-2.5">
+              <div className="text-[11px] leading-snug text-slate-300">
+                Replace your canvas with a reference 3-star design?
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    setConfirmReveal(false)
+                    revealSolution()
+                  }}
+                  className="flex-1 rounded-md bg-indigo-500 px-2 py-1 text-[11px] font-bold text-white transition hover:brightness-110"
+                >
+                  Show me
+                </button>
+                <button
+                  onClick={() => setConfirmReveal(false)}
+                  className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-slate-400"
+                >
+                  Keep mine
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmReveal(true)}
+              className="mt-2 w-full rounded-lg border border-indigo-500/40 px-3 py-1.5 text-[12px] font-medium text-indigo-300 transition hover:border-indigo-400 hover:bg-indigo-500/10"
+            >
+              📖 Reveal a 3-star answer
+            </button>
+          )
         )}
       </div>
 

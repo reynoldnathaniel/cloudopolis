@@ -11,6 +11,10 @@ import alb from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Netw
 import route53 from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Amazon-Route-53_64.svg'
 import apigw from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_App-Integration/Arch_64/Arch_Amazon-API-Gateway_64.svg'
 import rds from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Database/64/Arch_Amazon-RDS_64.svg'
+// No pack ships a dedicated read-replica icon; the RDS *instance* resource icon
+// is exactly what a replica is, and reads differently from the service icon
+// above so primary and replica are told apart at a glance.
+import rdsReplica from 'aws-svg-icons/lib/Resource-Icons_07302021/Res_Database/Res_48_Dark/Res_Amazon-Aurora_Amazon-RDS-Instance_48_Dark.svg'
 import dynamodb from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Database/64/Arch_Amazon-DynamoDB_64.svg'
 import elasticache from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Database/64/Arch_Amazon-ElastiCache_64.svg'
 import users from 'aws-svg-icons/lib/Resource-Icons_07302021/Res_General-Icons/Res_48_Dark/Res_Users_48_Dark.svg'
@@ -34,6 +38,7 @@ export const ICONS: Record<string, string> = {
   route53,
   apigw,
   rds,
+  'rds-replica': rdsReplica,
   dynamodb,
   elasticache,
   users,

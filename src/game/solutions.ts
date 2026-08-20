@@ -176,6 +176,32 @@ export const SOLUTIONS: Record<string, Solution> = {
     ],
   },
 
+  'the-feed': {
+    nodes: [
+      { key: 'alb', serviceId: 'alb', x: 270, y: 250 },
+      { key: 'app', serviceId: 'fargate', x: 460, y: 250 },
+      { key: 'rds', serviceId: 'rds', x: 680, y: 40 },
+      { key: 'rr-1', serviceId: 'rds-replica', x: 680, y: 150 },
+      { key: 'rr-2', serviceId: 'rds-replica', x: 680, y: 260 },
+      { key: 'rr-3', serviceId: 'rds-replica', x: 680, y: 370 },
+      { key: 'rr-4', serviceId: 'rds-replica', x: 680, y: 480 },
+    ],
+    edges: [
+      ['users', 'alb'],
+      ['alb', 'app'],
+      ['app', 'rds'],
+      ['app', 'rr-1'],
+      ['app', 'rr-2'],
+      ['app', 'rr-3'],
+      ['app', 'rr-4'],
+    ],
+    notes: [
+      'At the spike, 1,000 rps splits into ~100 writes and ~900 reads. The writes fit on one primary with room to spare; the reads need 900 ÷ 250 = four replicas.',
+      'Three replicas serve 750 reads and drop the rest — 85%, short of the 95% bar. Replicas do not auto-scale, so you size them for the peak and pay for them at the trough.',
+      'The primary stays in the design because writes have nowhere else to go, and because a replica is a copy — with no primary to stream from, replicas serve nothing at all.',
+    ],
+  },
+
   'order-storm': {
     nodes: chain('apigw', 'sns', 'sqs', 'lambda', 'dynamodb'),
     edges: link('users', 'apigw', 'sns', 'sqs', 'lambda', 'dynamodb'),

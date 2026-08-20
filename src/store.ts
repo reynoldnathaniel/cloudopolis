@@ -1017,7 +1017,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           const star3 = star2 && costAtBaseline <= scenario.budget
           const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 
-          const tips = tipsForIssues([...allIssues], { multiRegion: scenario.multiRegion })
+          const tips = tipsForIssues([...allIssues], {
+            multiRegion: scenario.multiRegion,
+            writeSplit: scenario.writeFraction !== undefined,
+          })
           if (findings) tips.push(...findings.map((f) => f.tip))
           if (blueprintMiss && blueprintMiss.length > 0) {
             const names = blueprintMiss.map((id) => SERVICES[id]?.name ?? id).join(', ')
