@@ -1,8 +1,5 @@
 import { create } from 'zustand'
 import {
-  applyNodeChanges,
-  applyEdgeChanges,
-  addEdge,
   type Node,
   type Edge,
   type NodeChange,
@@ -304,6 +301,27 @@ const RAMP_TICKS = 5
 // Ticks after the ramp settle before we start scoring a phase.
 const SCORE_AFTER = RAMP_TICKS + 2
 
+/**
+ * React Flow's three change-reducers, handed over by the game screen when it
+ * loads. The store cannot import them itself: it is pulled in by the main menu,
+ * and a static import would drag the whole of React Flow — the biggest
+ * dependency in the project — into the first chunk, to serve three functions
+ * that cannot run before a canvas exists.
+ *
+ * Every caller is a React Flow event handler, so `flow` is always set by the
+ * time any of this can fire; the null guards are for type-safety, not timing.
+ */
+interface FlowHelpers {
+  applyNodeChanges: (changes: NodeChange[], nodes: Node[]) => Node[]
+  applyEdgeChanges: (changes: EdgeChange[], edges: Edge[]) => Edge[]
+  addEdge: (conn: Connection & { type: string }, edges: Edge[]) => Edge[]
+}
+let flow: FlowHelpers | null = null
+
+export const provideFlowHelpers = (helpers: FlowHelpers): void => {
+  flow = helpers
+}
+
 let timer: ReturnType<typeof setInterval> | null = null
 // Set by whichever run loop is active, so stepTick() can advance exactly one
 // tick without the loop having to poll for it.
@@ -594,14 +612,18 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     })
   },
 
-  onNodesChange: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) }),
-  onEdgesChange: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
+  onNodesChange: (changes) => {
+    if (flow) set({ nodes: flow.applyNodeChanges(changes, get().nodes) })
+  },
+  onEdgesChange: (changes) => {
+    if (flow) set({ edges: flow.applyEdgeChanges(changes, get().edges) })
+  },
 
   onConnect: (conn) => {
     const { edges } = get()
-    if (conn.source === conn.target) return
+    if (!flow || conn.source === conn.target) return
     if (edges.some((e) => e.source === conn.source && e.target === conn.target)) return
-    set({ edges: addEdge({ ...conn, type: 'traffic' }, edges) })
+    set({ edges: flow.addEdge({ ...conn, type: 'traffic' }, edges) })
   },
 
   addServiceNode: (serviceId, position, exact = false) => {

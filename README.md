@@ -70,6 +70,26 @@ style you want to learn.
 | 🚨 **Day 2** | Game Day · The Shakedown · The Blackout | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live, and every offer is answerable with money — which is the point, because emergency capacity is billed to the same budget you are scored against. Then a botnet, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet. Then the last exam: an entire Region goes dark and the app stays up |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
 
+### Loading
+
+The app is split by route. The main menu ships in the initial chunk and paints on its own;
+everything behind it loads on demand, and the menu prefetches those chunks on an idle callback
+while you are reading it — so by the time you click through, the code is already there and the
+Suspense fallback never actually appears.
+
+| Chunk | Size | When it loads |
+| --- | --- | --- |
+| initial | 449 KB (144 KB gzip) | immediately — React, framer-motion, the store, the engine, the menu |
+| `GameScreen` | 249 KB (79 KB gzip) | prefetched on idle — React Flow, the canvas, every overlay |
+| `ScenarioSelect` | 6 KB | prefetched on idle |
+| `ScenarioEditor` | 15 KB | only if you open the editor |
+| `html-to-image` | 13 KB | only when you export a PNG or a share card |
+
+Before the split it was one 731 KB chunk (233 KB gzip) that the main menu had no use for.
+`store.ts` deliberately does **not** import React Flow: it is pulled in by the menu, and a static
+import would drag a whole graph library into the first chunk to serve three change-reducers that
+cannot run before a canvas exists. `GameScreen` hands them over via `provideFlowHelpers()` instead.
+
 ### Simulation mechanics
 
 - **Tick-based flow model** — traffic is routed through the graph every tick, with per-node
@@ -291,6 +311,7 @@ src/
     solutions.test.ts # replays every one of them and asserts three stars
     tutorial.ts     # the guided tutorial as data
   components/
+    GameScreen.tsx     # the canvas + sidebar, lazy-loaded (React Flow lives here)
     ServiceNode.tsx    # canvas nodes (+ the Users node)
     ZoneNode.tsx       # VPC / AZ container boxes
     TrafficEdge.tsx    # edges with animated traffic dots
@@ -315,7 +336,7 @@ replaying the level by hand.
 
 ## Roadmap
 
-- Korean localization · achievements · sound effects · undo/redo · route-level code splitting
+- Korean localization · achievements · sound effects · undo/redo
 
 ---
 

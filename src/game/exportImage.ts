@@ -6,8 +6,12 @@
 // element at a transform that frames the whole graph, rather than screenshotting
 // the visible pane.
 
-import { toPng } from 'html-to-image'
 import { getViewportForBounds, type Rect } from '@xyflow/react'
+
+// Loaded on demand. Rasterising a DOM tree is a big library to carry, and it is
+// dead weight for everyone who never clicks an export button — which is most
+// people, most of the time.
+const loadToPng = async () => (await import('html-to-image')).toPng
 
 const BG = '#0f172a'
 const PAD = 0.12
@@ -49,6 +53,8 @@ export async function captureCanvas(bounds: Rect, width = 1280, height = 720): P
   if (!viewportEl || bounds.width === 0 || bounds.height === 0) return null
 
   const { x, y, zoom } = getViewportForBounds(bounds, width, height, 0.2, 2, PAD)
+
+  const toPng = await loadToPng()
 
   return withTimeout(
     toPng(viewportEl, {
