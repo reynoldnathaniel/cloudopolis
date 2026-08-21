@@ -22,6 +22,7 @@ import {
   type SecurityFinding,
 } from './game/engine'
 import { SERVICES } from './game/services'
+import { canConnect } from './game/connections'
 import { getScenario, SANDBOX_ID, type Decision, type Scenario } from './game/scenarios'
 // Importing this module also loads + registers saved custom scenarios, so it
 // must stay above the saved-game validation below (imports run before body).
@@ -689,9 +690,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   onConnect: (conn) => {
-    const { edges } = get()
+    const { edges, nodes } = get()
     if (!flow || conn.source === conn.target) return
     if (edges.some((e) => e.source === conn.source && e.target === conn.target)) return
+    // The canvas refuses these before the drag ever completes; this is the same
+    // rule again for any path that does not go through a handle.
+    const source = nodes.find((n) => n.id === conn.source)
+    const target = nodes.find((n) => n.id === conn.target)
+    if (source && target && !canConnect(serviceIdOf(source), serviceIdOf(target))) return
     get().commitHistory()
     set({ edges: flow.addEdge({ ...conn, type: 'traffic' }, edges) })
   },

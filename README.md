@@ -381,10 +381,24 @@ src/
   App.tsx
 ```
 
+### Which wires you can draw
+
+`src/game/connections.ts` holds a **role-level** compatibility matrix, read straight off
+the engine's own target filters. It blocks only edges the engine would silently ignore —
+CloudFront → SNS, S3 → anything, a function publishing to a queue. Wires that are *wrong
+but instructive* stay drawable, because the engine already punishes them by name and
+explains itself afterwards: Users → RDS, a bus wired at a bucket, WAF placed behind the
+meter. Refusals appear as a hint that says what to build instead.
+
+Some blocked pairs are real AWS that this game simply doesn't model (DynamoDB Streams,
+S3 event notifications, EventBridge → SNS). Their copy says "not simulated here" rather
+than claiming the architecture is impossible.
+
 ### Extending it
 
 Scenarios and services are **pure data**. To add a level, append to `SCENARIOS` in
-`src/game/scenarios.ts`; to add a service, append to `SERVICES` in `src/game/services.ts`.
+`src/game/scenarios.ts`; to add a service, append to `SERVICES` in `src/game/services.ts`
+— it inherits its wiring rules from its `role`, so no matrix edit is usually needed.
 The engine is deterministic, so after any tuning run `npm test` (~130 ms) rather than
 replaying the level by hand.
 
@@ -393,8 +407,6 @@ replaying the level by hand.
 ## Roadmap
 
 - Korean localization
-- Connection validation — a role-level compatibility matrix so nonsense edges
-  (CloudFront → SNS) can't be drawn; rejected connections explain themselves
 
 ---
 

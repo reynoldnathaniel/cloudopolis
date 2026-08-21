@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { SERVICES, CATEGORY_COLORS } from '../game/services'
+import { allowedTargetRoles } from '../game/connections'
 import { ICONS } from '../game/icons'
 import { useGameStore, type AzId, type RegionId } from '../store'
 
@@ -26,7 +27,11 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
   const overloaded = !isDead && util > 1
   const utilPct = Math.min(100, Math.round(util * 100))
   const barColor = overloaded ? '#f87171' : util > 0.7 ? '#fbbf24' : '#34d399'
-  const hasSource = def.role !== 'db' && def.role !== 'origin-static'
+  // A service with nowhere to send traffic gets no output dot at all. This used
+  // to be spelled out here as `role !== 'db' && role !== 'origin-static'`, which
+  // is the same rule the connection matrix already states — two copies of one
+  // fact, free to drift apart. Ask the matrix.
+  const hasSource = allowedTargetRoles(def).length > 0
 
   const border = selected
     ? 'border-cyan-400 shadow-cyan-500/20'

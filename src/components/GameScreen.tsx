@@ -3,7 +3,7 @@
 // of all, which is the single biggest dependency in the project — is in the
 // chunk that paints the main menu.
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -18,6 +18,7 @@ import {
   useReactFlow,
   type Node,
   type IsValidConnection,
+  type OnConnectEnd,
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -43,6 +44,7 @@ import { TutorialCoach, SandboxCoach } from './TutorialCoach'
 import { SolutionNotes } from './SolutionNotes'
 import { DecisionModal } from './DecisionModal'
 import { CATEGORY_COLORS, SERVICES } from '../game/services'
+import { canConnect, connectionError } from '../game/connections'
 import { exportCanvasPng } from '../game/exportImage'
 import { SANDBOX_ID } from '../game/scenarios'
 
@@ -74,6 +76,9 @@ function regionAtPoint(x: number, y: number): RegionId | null {
   }
   return null
 }
+
+const serviceIdOfNode = (n: { type?: string; data: unknown }): string =>
+  n.type === 'users' ? 'users' : ((n.data as { serviceId?: string }).serviceId ?? 'users')
 
 function minimapColor(node: Node): string {
   if (node.type === 'users') return CATEGORY_COLORS.client
@@ -107,6 +112,7 @@ function Canvas() {
   const canUndo = useGameStore((s) => s.past.length > 0)
   const canRedo = useGameStore((s) => s.future.length > 0)
   const { screenToFlowPosition, getInternalNode, getNodesBounds } = useReactFlow()
+  const [rejected, setRejected] = useState<{ message: string; at: number } | null>(null)
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -212,10 +218,35 @@ function Canvas() {
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo])
 
+  // Invalid wires never snap: React Flow keeps the handle unlit and drops the
+  // connection on release, which is the same affordance a self-loop already had.
   const isValidConnection: IsValidConnection = useCallback(
-    (conn) => conn.source !== conn.target,
-    [],
+    (conn) => {
+      if (conn.source === conn.target) return false
+      const source = nodes.find((n) => n.id === conn.source)
+      const target = nodes.find((n) => n.id === conn.target)
+      if (!source || !target) return false
+      return canConnect(serviceIdOfNode(source), serviceIdOfNode(target))
+    },
+    [nodes],
   )
+
+  // A wire that silently refuses to attach is only half an answer — the player
+  // still has to guess why. This says it, and says what to build instead.
+  const onConnectEnd: OnConnectEnd = useCallback((_event, state) => {
+    if (state.isValid) return
+    const { fromNode, toNode } = state
+    if (!fromNode || !toNode || fromNode.id === toNode.id) return
+    const message = connectionError(serviceIdOfNode(fromNode), serviceIdOfNode(toNode))
+    if (message) setRejected({ message, at: Date.now() })
+  }, [])
+
+  // Auto-dismiss, keyed on `at` so a second rejection restarts the clock.
+  useEffect(() => {
+    if (!rejected) return
+    const t = setTimeout(() => setRejected(null), 6000)
+    return () => clearTimeout(t)
+  }, [rejected])
 
   return (
     <div className="relative h-full flex-1" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
@@ -225,6 +256,7 @@ function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStopCommit}
         nodeTypes={nodeTypes}
@@ -284,7 +316,18 @@ function Canvas() {
       <SandboxCoach />
       <SolutionNotes />
       <DecisionModal />
-      {editing && !tutorialActive && !sandboxTourActive && !notesOpen && (
+      {/* Same slot as the hint line below: while this is up it IS the hint. */}
+      {rejected && !notesOpen && (
+        <div
+          key={rejected.at}
+          role="status"
+          className="pointer-events-none absolute bottom-4 left-1/2 z-30 max-w-[92%] -translate-x-1/2 rounded-2xl border border-amber-500/40 bg-amber-950/80 px-5 py-2 text-center text-[12.5px] leading-relaxed text-amber-200 backdrop-blur"
+        >
+          <span className="mr-1.5">🚫</span>
+          {rejected.message}
+        </div>
+      )}
+      {editing && !tutorialActive && !sandboxTourActive && !notesOpen && !rejected && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 max-w-[92%] -translate-x-1/2 rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-2 text-center text-[12.5px] leading-relaxed text-slate-400 backdrop-blur">
           Drag services in · drag from a node&apos;s right dot to another&apos;s left dot to connect · select + ⌫ to delete
           {hasVpc ? ' · zonal services live inside an AZ box' : ''}

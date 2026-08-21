@@ -694,6 +694,38 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByRole('button', { name: /^▶ Run$/ })).toBeVisible()
   })
 
+  test('a nonsense wire is refused and says why, while the real ones still draw', async ({ page }) => {
+    await page.getByRole('button', { name: /Sandbox/ }).click()
+    await page.getByRole('button', { name: 'skip tutorial ✕' }).click()
+
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon SNS').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+
+    const cloudfront = '.react-flow__node[data-id^="cloudfront"]'
+    const sns = '.react-flow__node[data-id^="sns"]'
+    const s3 = '.react-flow__node[data-id^="s3"]'
+
+    // The edge that started all this: a CDN has no business feeding a topic.
+    await connect(page, cloudfront, sns)
+    await expect(page.getByRole('status')).toContainText('SNS carries events, not page requests')
+    expect(await edgeCount(page)).toBe(0)
+
+    // A valid origin still wires up, and doing so clears the complaint.
+    await connect(page, cloudfront, s3)
+    expect(await edgeCount(page)).toBe(1)
+
+    // ...and a *teaching* failure stays drawable: wiring a bus straight at a
+    // bucket is the mistake the engine explains during the run, so blocking it
+    // here would delete the lesson.
+    await connect(page, sns, s3)
+    expect(await edgeCount(page)).toBe(2)
+
+    // A data store is the end of the line, so it has no output dot to drag.
+    await expect(page.locator(`${s3} .react-flow__handle-right`)).toHaveCount(0)
+  })
+
   test('work survives a reload via Continue', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /Launch Day/ }).click()
