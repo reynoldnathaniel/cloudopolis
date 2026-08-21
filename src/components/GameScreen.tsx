@@ -237,7 +237,7 @@ function Canvas() {
         fitView
         fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
         colorMode="dark"
-        proOptions={{ hideAttribution: false }}
+        proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.5} color="#1e293b" />
         <Controls position="bottom-left" showInteractive={false}>
@@ -285,7 +285,7 @@ function Canvas() {
       <SolutionNotes />
       <DecisionModal />
       {editing && !tutorialActive && !sandboxTourActive && !notesOpen && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-500 backdrop-blur">
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 max-w-[92%] -translate-x-1/2 rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-2 text-center text-[12.5px] leading-relaxed text-slate-400 backdrop-blur">
           Drag services in · drag from a node&apos;s right dot to another&apos;s left dot to connect · select + ⌫ to delete
           {hasVpc ? ' · zonal services live inside an AZ box' : ''}
           {multiRegion ? ' · everything but DNS and the CDN lives inside a Region box' : ''}
@@ -323,7 +323,7 @@ export default function GameScreen() {
         </div>
         <footer className="mt-auto pt-3 text-[9px] leading-relaxed text-slate-600">
           Costs and capacities are simplified for gameplay — directionally true, not a pricing calculator.
-          AWS service icons are the official AWS Architecture Icons.
+          AWS service icons are the official AWS Architecture Icons. Canvas built with React Flow.
         </footer>
       </aside>
       <ReactFlowProvider>
