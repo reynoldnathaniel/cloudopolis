@@ -393,6 +393,8 @@ replaying the level by hand.
 ## Roadmap
 
 - Korean localization
+- Connection validation — a role-level compatibility matrix so nonsense edges
+  (CloudFront → SNS) can't be drawn; rejected connections explain themselves
 
 ---
 
