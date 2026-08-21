@@ -232,6 +232,16 @@ export const SOLUTIONS: Record<string, Solution> = {
     ],
   },
 
+  'game-day': {
+    nodes: chain('alb', 'fargate', 'dynamodb'),
+    edges: link('users', 'alb', 'fargate', 'dynamodb'),
+    notes: [
+      'A fleet that scales on its own answers the first incident for you: the spike is already covered, so the emergency capacity on offer is $80/mo you do not need to spend.',
+      'It answers the second one too. Rolling back costs a couple of ticks of reduced capacity, and a fleet with headroom absorbs that without dropping below the bar — riding out the leak does not.',
+      'Both calls were really made at design time. That is the point of the level: the pager only ever asks you to pay for the elasticity you skipped.',
+    ],
+  },
+
   blackout: {
     nodes: [
       { key: 'route53', serviceId: 'route53', x: 165, y: 245 },

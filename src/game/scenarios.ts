@@ -6,6 +6,7 @@ export type TrackId =
   | 'event-driven'
   | 'streaming'
   | 'global'
+  | 'day2'
   | 'custom'
 
 export interface Track {
@@ -60,12 +61,55 @@ export const TRACKS: Track[] = [
     description: 'The last exam: an entire Region goes dark and the app stays up.',
   },
   {
+    id: 'day2',
+    name: 'Day 2',
+    emoji: '🚨',
+    description: 'You are on call. The design is already shipped — now something is happening to it.',
+  },
+  {
     id: 'custom',
     name: 'My Scenarios',
     emoji: '🛠️',
     description: 'Author your own missions — for workshops, your team, or torture tests.',
   },
 ]
+
+/** Phases a decision can be scheduled in. Mirrors the store's RunPhaseName —
+ *  declared here so this module stays free of store imports. */
+export type DecisionPhase = 'baseline' | 'spike' | 'recovery' | 'outage' | 'probe'
+
+export interface DecisionOption {
+  label: string
+  /** One line, shown in the results breakdown once the run is over */
+  outcome: string
+  /** Flat dollars added to the scored monthly bill — emergency capacity is not free */
+  surcharge?: number
+  /** Multiply every compute tier's capacity for a while */
+  computeFactor?: { factor: number; ticks: number }
+  /** Multiply incoming traffic for a while */
+  rpsFactor?: { factor: number; ticks: number }
+}
+
+/**
+ * An incident raised mid-run. The simulation freezes, the player picks, and the
+ * run carries on changed. Options are written so the tempting one costs money
+ * and the free one only works if the design was already right — a decision
+ * should punish the architecture that needed it, not hand out a power-up.
+ */
+export interface Decision {
+  id: string
+  phase: DecisionPhase
+  /** Tick within that phase */
+  tick: number
+  emoji: string
+  title: string
+  prompt: string
+  options: [DecisionOption, DecisionOption]
+  /** Applied automatically when the timer runs out — always the benign one, so
+   *  an unattended run still reflects the design rather than the inattention. */
+  defaultIndex: 0 | 1
+  seconds: number
+}
 
 export interface Scenario {
   id: string
@@ -101,6 +145,8 @@ export interface Scenario {
    * the entire point, since it is what catches a function cold.
    */
   bursts?: { onTicks: number; offTicks: number }
+  /** Incidents that interrupt the run and ask the player to decide, live. */
+  decisions?: Decision[]
   baselineRps: number
   spikeRps: number
   spikeLabel: string
@@ -426,6 +472,77 @@ export const SCENARIOS: Scenario[] = [
       'API Gateway charges per request. At 500 RPS sustained, that alone is $50/mo — do the math against your budget.',
       'Kinesis is a durable, IAM-authenticated front door built exactly for this: high-volume ingest at a flat price.',
       'The pipeline: Kinesis → Lambda consumers → SageMaker endpoint for scoring.',
+    ],
+  },
+  // ---------------------------------------------------------------- Day 2
+  {
+    id: 'game-day',
+    track: 'day2',
+    order: 1,
+    difficulty: 3,
+    title: 'Game Day',
+    emoji: '🚨',
+    hook: 'You are on call during the final. Two calls to make, live.',
+    brief:
+      'The tournament final streams tonight and you are holding the pager. The architecture is already deployed — that part is over. What is left is the part nobody puts in the design doc: two incidents will land mid-run, the clock will be running, and you will have to answer them while the traffic is still arriving. Both offers will be tempting. Neither is free.',
+    need: 'app',
+    baselineRps: 300,
+    spikeRps: 1500,
+    spikeLabel: '🚨 Kickoff — the whole tournament tunes in!',
+    budget: 120,
+    hasProbe: true,
+    goalHints: [
+      'Every incident is answerable with money. The question each one really asks is whether you needed to spend it.',
+      'Emergency capacity is billed to the same budget you are scored against — buying your way out of the spike does not buy your way out of the bill.',
+      'A fleet that scales on its own makes both decisions cheap. That call was made at design time, before the pager went off.',
+    ],
+    decisions: [
+      {
+        id: 'gd-capacity',
+        phase: 'spike',
+        tick: 3,
+        emoji: '📈',
+        title: 'Traffic is past forecast',
+        prompt:
+          'Viewership is running well above what anyone modelled, and it is still climbing. Your account manager can push emergency capacity through in seconds — at a premium that lands on this month’s bill.',
+        options: [
+          {
+            label: 'Trust the design',
+            outcome: 'Declined emergency capacity — the architecture carried the spike on its own.',
+          },
+          {
+            label: 'Buy capacity · +$80/mo',
+            outcome: 'Bought emergency capacity: 6× compute for the spike, and $80/mo on the bill.',
+            surcharge: 80,
+            computeFactor: { factor: 6, ticks: 24 },
+          },
+        ],
+        defaultIndex: 0,
+        seconds: 15,
+      },
+      {
+        id: 'gd-deploy',
+        phase: 'spike',
+        tick: 13,
+        emoji: '🐛',
+        title: 'The 4pm deploy is leaking',
+        prompt:
+          'The build that shipped this afternoon is leaking memory. Throughput is decaying and it will not stop on its own. Rolling back costs you a couple of minutes of churn while instances cycle; riding it out means running degraded through the rest of the final.',
+        options: [
+          {
+            label: 'Roll back now',
+            outcome: 'Rolled back: two ticks of churn while the fleet cycled, then healthy again.',
+            computeFactor: { factor: 0.75, ticks: 2 },
+          },
+          {
+            label: 'Ride it out',
+            outcome: 'Rode out the leak: capacity stayed degraded for the rest of the spike.',
+            computeFactor: { factor: 0.6, ticks: 14 },
+          },
+        ],
+        defaultIndex: 0,
+        seconds: 15,
+      },
     ],
   },
   // ---------------------------------------------------------- Going Global

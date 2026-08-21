@@ -72,7 +72,7 @@ test.describe('SimCloud smoke', () => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await expect(page.getByRole('heading', { name: 'Choose your scenario' })).toBeVisible()
 
-    for (const track of ['Foundations', 'Containers', 'GenAI', 'Data', 'Event-Driven', 'Streaming', 'Going Global', 'My Scenarios']) {
+    for (const track of ['Foundations', 'Containers', 'GenAI', 'Data', 'Event-Driven', 'Streaming', 'Going Global', 'Day 2', 'My Scenarios']) {
       await expect(page.getByRole('heading', { name: new RegExp(track) })).toBeVisible()
     }
     for (const title of ['Launch Day', 'PhotoShare', 'IPO Day', 'Prompt Rush', 'Grounded', 'Order Storm', 'Click Stream']) {
@@ -158,6 +158,52 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
     await expect(page.getByText('survive the Region failure (≥95%)')).toBeVisible()
     await expect(page.getByText('✓ $113/mo')).toBeVisible()
+  })
+
+  test('Game Day: an incident freezes the run, and buying capacity shows on the bill', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Game Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    // An elastic fleet: this design does not need anything the incidents offer.
+    await palette(page, 'Application Load Balancer').click()
+    await palette(page, 'Amazon ECS on AWS Fargate').click()
+    await palette(page, 'Amazon DynamoDB').click()
+    await fitView(page)
+    const n = (id: string) => `.react-flow__node[data-id="${id}"]`
+    await connect(page, n('users'), n('alb-1'))
+    await connect(page, n('alb-1'), n('fargate-2'))
+    await connect(page, n('fargate-2'), n('dynamodb-3'))
+    expect(await edgeCount(page)).toBe(3)
+
+    await page.getByRole('button', { name: /Simulate/ }).click()
+
+    // First incident: the run must actually stop and wait.
+    await expect(page.getByText('Traffic is past forecast')).toBeVisible({ timeout: 30_000 })
+    const rpsAt = async () =>
+      page.evaluate(() => /(\d[\d,]*)\s*REQ\/S/i.exec(document.body.innerText)?.[1] ?? null)
+    const before = await rpsAt()
+    expect(before).not.toBeNull()
+    await page.waitForTimeout(2_500) // ~14 ticks would have elapsed if it were running
+    expect(await rpsAt()).toBe(before)
+
+    // Take the expensive way out.
+    await page.getByRole('button', { name: /Buy capacity/ }).click()
+    await expect(page.getByText('Traffic is past forecast')).toHaveCount(0)
+
+    // Second incident: take the runbook default explicitly.
+    await expect(page.getByText('The 4pm deploy is leaking')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: /Roll back now/ }).click()
+
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 60_000 })
+
+    // The design held; the surcharge is what costs the third star.
+    await expect(page.getByText('survive the spike (≥95%)')).toBeVisible()
+    await expect(page.getByText(/incl\. \$80 bought mid-incident/)).toBeVisible()
+    await expect(page.getByText('✗ $147/mo')).toBeVisible()
+    await expect(page.getByText('🚨 Calls you made')).toBeVisible()
   })
 
   test('Trivia Night: plain Lambda cold-starts on every burst, PC does not', async ({ page }) => {

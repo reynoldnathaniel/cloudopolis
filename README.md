@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 7 tracks, 13 scenarios
+### 8 tracks, 14 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -70,6 +70,7 @@ style you want to learn.
 | 📨 **Event-Driven** | Order Storm · Trivia Night | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue |
 | 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
 | 🌍 **Going Global** | The Blackout | An entire Region dies. Route 53 health checks fail traffic over to a complete second stack — and because the survivor absorbs *all* the load, only elastic services make two full regions affordable |
+| 🚨 **Day 2** | Game Day | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live — and every offer is answerable with money, which is the point: emergency capacity is billed to the same budget you are scored against |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
 
 ### Simulation mechanics
@@ -103,6 +104,13 @@ style you want to learn.
   is quiet between bursts goes cold again before every one of them. Provisioned concurrency buys a
   floor that never goes cold. Paired with **burst traffic**: a square wave that slams between peak
   and idle with no ramp, because a ramp gives a function all the time it needs to warm up.
+- **Mid-run decisions** — an incident can interrupt a run: the simulation freezes, a countdown starts,
+  and two options wait. Answer, or the scenario's runbook default is applied for you. Effects stack and
+  expire independently (emergency capacity bought at the top of a spike is still there when a leak
+  starts eating into it), and surcharges land on the same bill the design is scored against. The
+  options are written so the tempting one costs money and the free one only works if the design was
+  already right — a decision punishes the architecture that needed it rather than handing out a
+  power-up.
 - **Retrieve-then-generate chains** — a vector store (OpenSearch) is a *mid-chain* stage: it
   grounds a request and forwards all of it onward, answering nothing itself. A request counts
   as served only once it completes the whole chain, so RAG is visible on the canvas as
@@ -290,7 +298,6 @@ replaying the level by hand.
 
 - WAF + DDoS event, extending the security probe into a scenario of its own
 - EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
-- Mid-run decision events
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---

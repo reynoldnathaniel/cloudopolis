@@ -28,6 +28,7 @@ import { ScenarioSelect } from './components/ScenarioSelect'
 import { ScenarioEditor } from './components/ScenarioEditor'
 import { TutorialCoach, SandboxCoach } from './components/TutorialCoach'
 import { SolutionNotes } from './components/SolutionNotes'
+import { DecisionModal } from './components/DecisionModal'
 import { CATEGORY_COLORS, SERVICES } from './game/services'
 import { exportCanvasPng } from './game/exportImage'
 import { SANDBOX_ID } from './game/scenarios'
@@ -205,6 +206,7 @@ function Canvas() {
       <TutorialCoach />
       <SandboxCoach />
       <SolutionNotes />
+      <DecisionModal />
       {editing && !tutorialActive && !sandboxTourActive && !notesOpen && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-slate-800 bg-slate-900/80 px-4 py-1.5 text-[10px] text-slate-500 backdrop-blur">
           Drag services in · drag from a node&apos;s right dot to another&apos;s left dot to connect · select + ⌫ to delete

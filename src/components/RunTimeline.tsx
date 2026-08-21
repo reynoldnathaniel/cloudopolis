@@ -78,6 +78,23 @@ export function RunTimeline() {
             )
           })}
 
+          {/* Incidents answered mid-run */}
+          {history.map((pt, i) =>
+            pt.decision ? (
+              <line
+                key={`d${i}`}
+                x1={g.x(i)}
+                y1={PLOT.y - 4}
+                x2={g.x(i)}
+                y2={floor}
+                stroke="#fbbf24"
+                strokeWidth="1"
+                strokeDasharray="1 2"
+                opacity="0.8"
+              />
+            ) : null,
+          )}
+
           {defs.map((d) => (
             <g key={d.key}>
               {d.area && (

@@ -1032,3 +1032,43 @@ describe('Event-Driven: Trivia Night (trivia-night)', () => {
     expect(s.nodeLoads['fn'].processed).toBeCloseTo(5000, 5)
   })
 })
+
+// ------------------------------------------------------------ Day 2: Game Day
+
+describe('Day 2: Game Day (game-day)', () => {
+  const sc = getScenario('game-day')
+
+  it('the capacity modifier scales the compute tier and nothing else', () => {
+    const nodes = [N('users', 'users'), N('lb', 'alb'), N('c', 'ec2'), N('db', 'rds')]
+    const edges = [E('users', 'lb'), E('lb', 'c'), E('c', 'db')]
+    const plain = simulateTick(nodes, edges, 600, sc, {}, {}, {})
+    const boosted = simulateTick(nodes, edges, 600, sc, {}, {}, {}, { computeCapacityFactor: 4 })
+    expect(plain.nodeLoads['c'].capacity).toBe(150)
+    expect(boosted.nodeLoads['c'].capacity).toBe(600)
+    // The database ceiling is not something you can buy your way past.
+    expect(boosted.nodeLoads['db'].capacity).toBe(SERVICES.rds.capacity)
+  })
+
+  it('scales an elastic fleet on top of its own scaling', () => {
+    const nodes = [N('users', 'users'), N('lb', 'alb'), N('c', 'fargate'), N('db', 'dynamodb')]
+    const edges = [E('users', 'lb'), E('lb', 'c'), E('c', 'db')]
+    const halved = simulateTick(nodes, edges, 500, sc, { c: 5 }, {}, {}, { computeCapacityFactor: 0.5 })
+    expect(halved.nodeLoads['c'].capacity).toBe(250) // 5 tasks × 100 × 0.5
+  })
+
+  it('every incident is scheduled inside a phase the run actually reaches', () => {
+    const lengths: Record<string, number> = { baseline: 24, spike: 26, recovery: 6, probe: 12 }
+    for (const d of sc.decisions ?? []) {
+      expect(lengths[d.phase], `${d.id} targets a phase this scenario never runs`).toBeDefined()
+      expect(d.tick).toBeLessThan(lengths[d.phase])
+      // The runbook default has to be the survivable one — an unattended run
+      // must still reflect the design rather than the inattention.
+      expect(d.options[d.defaultIndex].surcharge ?? 0).toBe(0)
+    }
+  })
+
+  it('decision ids are unique, so each incident fires exactly once', () => {
+    const ids = (sc.decisions ?? []).map((d) => d.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})

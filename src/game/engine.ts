@@ -43,6 +43,17 @@ export interface NodeLoad {
   backlog?: number
 }
 
+/**
+ * Live adjustments from a mid-run decision. Deliberately thin: the engine only
+ * needs to know how much compute capacity is available this tick, and the store
+ * owns everything else about how a decision plays out (surcharges, traffic
+ * shaping, how long an effect lasts).
+ */
+export interface TickModifiers {
+  /** Multiplies every compute tier's capacity — emergency capacity, or a leak */
+  computeCapacityFactor?: number
+}
+
 export interface TickStats {
   nodeLoads: Record<string, NodeLoad>
   edgeFlows: Record<string, number>
@@ -101,7 +112,9 @@ export function simulateTick(
   fleetCounts: Record<string, number> = {},
   queueBacklogs: Record<string, number> = {},
   warmCapacity: Record<string, number> = {},
+  modifiers: TickModifiers = {},
 ): TickStats {
+  const computeFactor = modifiers.computeCapacityFactor ?? 1
   const nodeById = new Map(nodes.map((n) => [n.id, n]))
   const out = new Map<string, LiteEdge[]>()
   const indeg = new Map<string, number>()
@@ -160,9 +173,13 @@ export function simulateTick(
   }
 
   const effectiveCapacity = (n: LiteNode): number => {
-    const scaling = SERVICES[n.serviceId].scaling
-    if (scaling) return (fleetCounts[n.id] ?? scaling.min) * scaling.perUnit
-    return SERVICES[n.serviceId].capacity
+    const svc = SERVICES[n.serviceId]
+    const base = svc.scaling
+      ? (fleetCounts[n.id] ?? svc.scaling.min) * svc.scaling.perUnit
+      : svc.capacity
+    // A decision that adds or removes capacity acts on the compute tier only —
+    // nobody emergency-provisions their way out of a database ceiling.
+    return svc.role === 'compute' ? base * computeFactor : base
   }
 
   // A read replica is a copy of something. With no primary in the design there

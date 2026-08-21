@@ -23,7 +23,7 @@ import {
   type SecurityFinding,
 } from './game/engine'
 import { SERVICES } from './game/services'
-import { getScenario, SANDBOX_ID, type Scenario } from './game/scenarios'
+import { getScenario, SANDBOX_ID, type Decision, type Scenario } from './game/scenarios'
 // Importing this module also loads + registers saved custom scenarios, so it
 // must stay above the saved-game validation below (imports run before body).
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
@@ -37,6 +37,17 @@ export type GamePhase = 'edit' | 'run' | 'results'
 export type RunPhaseName = 'baseline' | 'spike' | 'recovery' | 'outage' | 'probe'
 export type AzId = 'a' | 'b'
 export type RegionId = 'use1' | 'apne2'
+
+/** What the player chose when an incident interrupted the run. */
+export interface DecisionRecord {
+  emoji: string
+  title: string
+  choice: string
+  outcome: string
+  surcharge: number
+  /** true when the countdown expired and the runbook default was applied */
+  auto: boolean
+}
 
 export interface RunResults {
   stars: number
@@ -55,8 +66,12 @@ export interface RunResults {
   securityFindings: number | null
   /** required services missing or idle; null = scenario has no requirement */
   blueprintMissing: string[] | null
+  /** Baseline cost plus any surcharges the run's decisions incurred */
   costAtBaseline: number
+  /** Of that cost, how much came from decisions rather than the design */
+  surcharge: number
   budget: number
+  decisions: DecisionRecord[]
   tips: string[]
 }
 
@@ -73,6 +88,8 @@ export interface TickPoint {
   backlog: number
   cost: number
   phase: RunPhaseName
+  /** An incident was answered on this tick — marked on the run timeline */
+  decision?: boolean
 }
 
 export type Screen = 'menu' | 'select' | 'game' | 'editor'
@@ -96,6 +113,8 @@ interface GameStore {
   runHistory: TickPoint[]
   /** Presenter control: the simulation is frozen (works in scenarios and the sandbox) */
   paused: boolean
+  /** An incident is waiting on an answer. The run is frozen until it is resolved. */
+  pendingDecision: Decision | null
   /** The AZ struck by the outage event (set during a run of an outage scenario) */
   struckAz: AzId | null
   /** The Region struck by the outage event (multi-region scenarios only) */
@@ -187,6 +206,8 @@ interface GameStore {
   togglePause: () => void
   /** Advance exactly one tick while paused */
   stepTick: () => void
+  /** Answer the pending incident. `auto` marks the countdown expiring rather than a click. */
+  chooseDecision: (optionIndex: number, auto?: boolean) => void
   stopRun: () => void
   backToEdit: () => void
   clearCanvas: () => void
@@ -277,6 +298,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 // Set by whichever run loop is active, so stepTick() can advance exactly one
 // tick without the loop having to poll for it.
 let stepOnce: (() => void) | null = null
+// Set by the scenario run loop so chooseDecision() can reach into its state.
+let applyDecision: ((optionIndex: number, auto: boolean) => void) | null = null
 let idCounter = 0
 
 // ---- persistence (localStorage) ----
@@ -341,6 +364,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   results: null,
   runHistory: [],
   paused: false,
+  pendingDecision: null,
   struckAz: null,
   struckRegion: null,
   deadNodeIds: [],
@@ -881,9 +905,49 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const history: TickPoint[] = []
     let blueprintMiss: string[] | null = scenario.requiredServices ? scenario.requiredServices.slice() : null
 
+    // ---- mid-run decisions ----
+    // Each incident fires once, freezes the run, and leaves behind effects that
+    // tick down from here.
+    const firedDecisions = new Set<string>()
+    const decisionLog: DecisionRecord[] = []
+    let surchargeTotal = 0
+    // Effects stack and expire independently: emergency capacity bought at the
+    // top of the spike must still be there when a leak starts eating into it,
+    // rather than being replaced by it.
+    let computeEffects: { factor: number; ticksLeft: number }[] = []
+    let rpsEffects: { factor: number; ticksLeft: number }[] = []
+    const product = (fx: { factor: number }[]) => fx.reduce((a, e) => a * e.factor, 1)
+    const expire = (fx: { factor: number; ticksLeft: number }[]) =>
+      fx.map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 })).filter((e) => e.ticksLeft > 0)
+    let decisionAnsweredThisTick = false
+
+    applyDecision = (optionIndex, auto) => {
+      const decision = get().pendingDecision
+      if (!decision) return
+      const option = decision.options[optionIndex] ?? decision.options[decision.defaultIndex]
+      if (option.surcharge) surchargeTotal += option.surcharge
+      if (option.computeFactor) {
+        computeEffects.push({ factor: option.computeFactor.factor, ticksLeft: option.computeFactor.ticks })
+      }
+      if (option.rpsFactor) {
+        rpsEffects.push({ factor: option.rpsFactor.factor, ticksLeft: option.rpsFactor.ticks })
+      }
+      decisionLog.push({
+        emoji: decision.emoji,
+        title: decision.title,
+        choice: option.label,
+        outcome: option.outcome,
+        surcharge: option.surcharge ?? 0,
+        auto,
+      })
+      decisionAnsweredThisTick = true
+      set({ pendingDecision: null })
+    }
+
     set({
       phase: 'run',
       paused: false,
+      pendingDecision: null,
       results: null,
       runHistory: [],
       runPhase: 'baseline',
@@ -894,9 +958,22 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       breachedNodeIds: [],
     })
 
-    const doTick = () => {
+    /** Returns false when it stopped to raise an incident instead of ticking. */
+    const doTick = (): boolean => {
       const { nodes, edges } = get()
       const ph = phases[phaseIdx]
+
+      // An incident interrupts *before* the tick it is scheduled for, so the
+      // player answers while the situation is still ahead of them.
+      const due = scenario.decisions?.find(
+        (d) => d.phase === ph.name && d.tick === tickInPhase && !firedDecisions.has(d.id),
+      )
+      if (due) {
+        firedDecisions.add(due.id)
+        set({ pendingDecision: due })
+        return false
+      }
+
       // Burst scenarios square-wave the spike phase instead of ramping into it:
       // the instantaneous jump is the whole mechanic, since a gentle ramp gives
       // a serverless function all the time it needs to warm up.
@@ -909,6 +986,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         const ramp = Math.min(1, (tickInPhase + 1) / RAMP_TICKS)
         rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
       }
+      if (rpsEffects.length > 0) rps = Math.round(rps * product(rpsEffects))
 
       const outageNow = ph.name === 'outage'
       const lite: LiteNode[] = []
@@ -956,6 +1034,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         fleetCounts,
         backlogState,
         warmState,
+        { computeCapacityFactor: product(computeEffects) },
       )
       backlogState = stats.queueBacklogs
       warmState = stats.warmCapacity
@@ -967,7 +1046,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         backlog: Object.values(backlogState).reduce((a, b) => a + b, 0),
         cost,
         phase: ph.name,
+        decision: decisionAnsweredThisTick || undefined,
       })
+      decisionAnsweredThisTick = false
       stats.issues.forEach((i) => allIssues.add(i))
       runServed += stats.served
       runDropped += stats.dropped
@@ -1004,6 +1085,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         liveSuccess,
         deadNodeIds: deadIds,
       })
+
+      // Decision effects are temporary — count them down once per tick.
+      computeEffects = expire(computeEffects)
+      rpsEffects = expire(rpsEffects)
 
       tickInPhase += 1
       ticksDone += 1
@@ -1052,7 +1137,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
               secure &&
               blueprintOk
           }
-          const star3 = star2 && costAtBaseline <= scenario.budget
+          // Emergency capacity is billed to the same budget the design is —
+          // that is the entire point of offering it.
+          const scoredCost = costAtBaseline + surchargeTotal
+          const star3 = star2 && scoredCost <= scenario.budget
           const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 
           const tips = tipsForIssues([...allIssues], {
@@ -1064,9 +1152,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
             const names = blueprintMiss.map((id) => SERVICES[id]?.name ?? id).join(', ')
             tips.push(`Blueprint: this scenario requires ${names} in the serving path.`)
           }
-          if (star2 && costAtBaseline > scenario.budget) {
+          if (star2 && scoredCost > scenario.budget) {
             tips.push(
-              `Solid architecture, but $${costAtBaseline}/mo blows the $${scenario.budget} budget. Serverless services cost near-zero at low traffic.`,
+              surchargeTotal > 0
+                ? `The architecture held, but $${surchargeTotal}/mo of that bill was bought mid-incident. A design that scales on its own would not have needed the offer.`
+                : `Solid architecture, but $${scoredCost}/mo blows the $${scenario.budget} budget. Serverless services cost near-zero at low traffic.`,
             )
           }
 
@@ -1095,7 +1185,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
               finalBacklog,
               securityFindings: findings === null ? null : findings.length,
               blueprintMissing: blueprintMiss,
-              costAtBaseline,
+              costAtBaseline: scoredCost,
+              surcharge: surchargeTotal,
+              decisions: decisionLog,
               budget: scenario.budget,
               tips,
             },
@@ -1103,6 +1195,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           })
         }
       }
+      return true
     }
 
     // Time-based scheduling: browsers throttle setInterval in hidden tabs, so on
@@ -1111,13 +1204,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const totalTicks = phases.reduce((sum, p) => sum + p.ticks, 0)
     stepOnce = () => {
       if (ticksDone >= totalTicks) return
-      doTick()
+      if (!doTick()) return
       // Keep the clock in step with the manual advance so pacing stays exact
       // once the run resumes.
       startedAt += TICK_MS
     }
     timer = setInterval(() => {
-      if (get().paused) {
+      // A pending incident freezes the run exactly like a presenter pause does,
+      // clock shift included — thinking time must not become fast-forward.
+      if (get().paused || get().pendingDecision !== null) {
         if (pausedSince === null) pausedSince = performance.now()
         return
       }
@@ -1128,26 +1223,35 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       const owed = Math.min(totalTicks, Math.floor((performance.now() - startedAt) / TICK_MS))
       let burst = 0
       while (ticksDone < owed && burst < 20 && timer !== null) {
-        doTick()
+        // doTick stops short when it raises an incident; the next fire freezes.
+        if (!doTick()) break
         burst += 1
       }
     }, TICK_MS)
   },
 
+  // Presenter controls stand down while an incident is on screen — the run is
+  // already frozen, and stepping past an unanswered decision would skip it.
   togglePause: () => {
-    if (get().phase !== 'run') return
+    if (get().phase !== 'run' || get().pendingDecision) return
     set({ paused: !get().paused })
   },
 
   stepTick: () => {
-    if (get().phase !== 'run' || !get().paused) return
+    if (get().phase !== 'run' || !get().paused || get().pendingDecision) return
     stepOnce?.()
+  },
+
+  chooseDecision: (optionIndex, auto = false) => {
+    applyDecision?.(optionIndex, auto)
   },
 
   stopRun: () => {
     if (timer) clearInterval(timer)
     timer = null
     stepOnce = null
+    applyDecision = null
+    if (get().pendingDecision) set({ pendingDecision: null })
     if (get().phase === 'run') {
       set({
         phase: 'edit',

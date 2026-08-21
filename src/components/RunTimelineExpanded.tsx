@@ -151,6 +151,27 @@ export function RunTimelineExpanded({ onClose }: { onClose: () => void }) {
                 )
               })}
 
+              {/* Incidents answered mid-run */}
+              {history.map((pt, i) =>
+                pt.decision ? (
+                  <g key={`d${i}`}>
+                    <line
+                      x1={g.x(i)}
+                      y1={PLOT.y}
+                      x2={g.x(i)}
+                      y2={floor}
+                      stroke="#fbbf24"
+                      strokeWidth="1.25"
+                      strokeDasharray="2 3"
+                      opacity="0.9"
+                    />
+                    <text x={g.x(i)} y={PLOT.y - 2} textAnchor="middle" fontSize="10">
+                      🚨
+                    </text>
+                  </g>
+                ) : null,
+              )}
+
               {/* gridlines + dual axis labels */}
               {GRID.map((f) => (
                 <g key={f}>

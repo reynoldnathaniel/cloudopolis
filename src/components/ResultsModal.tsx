@@ -166,11 +166,38 @@ export function ResultsModal() {
               )}
               <Pillar
                 label="💰 Cost"
-                target={`stay under $${results.budget}/mo`}
+                target={
+                  results.surcharge > 0
+                    ? `stay under $${results.budget}/mo · incl. $${results.surcharge} bought mid-incident`
+                    : `stay under $${results.budget}/mo`
+                }
                 value={`$${results.costAtBaseline}/mo`}
                 pass={results.costAtBaseline <= results.budget}
               />
             </div>
+
+            {results.decisions.length > 0 && (
+              <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-800/40 p-3">
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                  🚨 Calls you made
+                </div>
+                <ul className="space-y-2">
+                  {results.decisions.map((d) => (
+                    <li key={d.title} className="text-[11px] leading-snug">
+                      <div className="flex items-baseline gap-1.5">
+                        <span>{d.emoji}</span>
+                        <span className="font-semibold text-slate-200">{d.choice}</span>
+                        {d.surcharge > 0 && (
+                          <span className="font-bold text-amber-300">+${d.surcharge}/mo</span>
+                        )}
+                        {d.auto && <span className="text-[9px] text-slate-500">· runbook default</span>}
+                      </div>
+                      <div className="text-slate-400">{d.outcome}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {results.tips.length > 0 && (
               <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">

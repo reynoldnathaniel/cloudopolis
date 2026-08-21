@@ -116,6 +116,11 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
 
   let backlogs: Record<string, number> = {}
   let warm: Record<string, number> = {}
+  // An unattended run takes every runbook default, which is exactly the path a
+  // reference answer has to survive.
+  let surcharge = 0
+  let computeEffects: { factor: number; ticksLeft: number }[] = []
+  const product = () => computeEffects.reduce((a, e) => a * e.factor, 1)
   let prevLoads: Record<string, { inRps: number }> = {}
   let prevRps = 0
   let cost = 0
@@ -136,6 +141,18 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
         const ramp = Math.min(1, (tick + 1) / RAMP_TICKS)
         rps = Math.round(prevRps + (ph.rps - prevRps) * ramp)
       }
+      const due = scenario.decisions?.find((d) => d.phase === ph.name && d.tick === tick)
+      if (due) {
+        const option = due.options[due.defaultIndex]
+        surcharge += option.surcharge ?? 0
+        if (option.computeFactor) {
+          computeEffects.push({
+            factor: option.computeFactor.factor,
+            ticksLeft: option.computeFactor.ticks,
+          })
+        }
+      }
+
       const outageNow = ph.name === 'outage'
 
       const lite: LiteNode[] = nodes.map((n) => {
@@ -160,10 +177,15 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
         findings = securityAudit(lite, edges).length
       }
 
-      const stats = simulateTick(lite, edges, rps, scenario, fleets, backlogs, warm)
+      const stats = simulateTick(lite, edges, rps, scenario, fleets, backlogs, warm, {
+        computeCapacityFactor: product(),
+      })
       backlogs = stats.queueBacklogs
       warm = stats.warmCapacity
       prevLoads = stats.nodeLoads
+      computeEffects = computeEffects
+        .map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 }))
+        .filter((e) => e.ticksLeft > 0)
 
       runServed += stats.served
       runDropped += stats.dropped
@@ -174,6 +196,7 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
       }
       if (ph.name === 'baseline' && tick === ph.ticks - 1) {
         cost = estimateMonthlyCost(lite, stats.nodeLoads)
+
         if (scenario.requiredServices) {
           missing = blueprintMissing(scenario.requiredServices, lite, stats.nodeLoads)
         }
@@ -207,7 +230,9 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
       secure &&
       blueprintOk
   }
-  const star3 = star2 && cost <= scenario.budget
+  // Surcharges from decisions land on the same bill the design does.
+  const scoredCost = cost + surcharge
+  const star3 = star2 && scoredCost <= scenario.budget
   const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 
   return {
@@ -219,7 +244,7 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
     finalBacklog,
     findings: scenario.hasProbe ? (findings ?? 0) : null,
     missing,
-    cost,
+    cost: scoredCost,
     stars,
   }
 }
