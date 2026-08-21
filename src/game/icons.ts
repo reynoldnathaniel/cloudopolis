@@ -21,6 +21,8 @@ import elasticache from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/A
 import users from 'aws-svg-icons/lib/Resource-Icons_07302021/Res_General-Icons/Res_48_Dark/Res_Users_48_Dark.svg'
 import sqs from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_App-Integration/Arch_64/Arch_Amazon-Simple-Queue-Service_64.svg'
 import sns from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_App-Integration/Arch_64/Arch_Amazon-Simple-Notification-Service_64.svg'
+import eventbridge from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_App-Integration/Arch_64/Arch_Amazon-EventBridge_64.svg'
+import firehose from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Analytics/Arch_64/Arch_Amazon-Kinesis-Firehose_64.svg'
 import kinesis from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Analytics/Arch_64/Arch_Amazon-Kinesis-Data-Streams_64.svg'
 import sagemaker from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Machine-Learning/64/Arch_Amazon-SageMaker_64.svg'
 // Bedrock postdates the 2021 asset pack — its official icon comes from aws-icons.
@@ -47,6 +49,8 @@ export const ICONS: Record<string, string> = {
   users,
   sqs,
   sns,
+  eventbridge,
+  firehose,
   kinesis,
   sagemaker,
   bedrock,

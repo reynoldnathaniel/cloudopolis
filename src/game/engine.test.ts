@@ -10,6 +10,7 @@ import {
   blueprintMissing,
   nextFleetCount,
   fleetMin,
+  observedLoad,
   tipsForIssues,
   type LiteNode,
   type LiteEdge,
@@ -53,7 +54,7 @@ function steady(
   warm = stats.warmCapacity
   for (let i = 0; i < 30; i++) {
     for (const id of Object.keys(asg)) {
-      asg[id] = nextFleetCount(svcOf[id], asg[id], stats.nodeLoads[id]?.inRps ?? 0)
+      asg[id] = nextFleetCount(svcOf[id], asg[id], observedLoad(stats.nodeLoads[id]))
     }
     stats = simulateTick(effective, edges, rps, scenario, asg, backlogs, warm)
     backlogs = stats.queueBacklogs
@@ -86,7 +87,8 @@ function runSequence(
   let prev: TickStats | null = null
   for (const rps of rpsPerTick) {
     if (prev) {
-      for (const id of Object.keys(asg)) asg[id] = nextFleetCount(svcOf[id], asg[id], prev.nodeLoads[id]?.inRps ?? 0)
+      for (const id of Object.keys(asg))
+        asg[id] = nextFleetCount(svcOf[id], asg[id], observedLoad(prev.nodeLoads[id]))
     }
     const stats = simulateTick(nodes, edges, rps, scenario, asg, backlogs)
     backlogs = stats.queueBacklogs
@@ -1259,5 +1261,145 @@ describe('track structure', () => {
       }
       expect(hops, `"${track.name}" chain breaks before its last mission`).toBe(inTrack.length)
     }
+  })
+})
+
+describe('Event-Driven: Paper Trail (paper-trail)', () => {
+  const sc = getScenario('paper-trail')
+  const RATE = sc.baselineRps
+
+  /** The bus, its three branches, and whichever bus service you hand it. */
+  const platform = (bus: string) => ({
+    nodes: [
+      N('users', 'users'),
+      N('bus', bus),
+      N('q', 'sqs'),
+      N('orders', 'lambda'),
+      N('fraud', 'lambda'),
+      N('ddb', 'dynamodb'),
+      N('fh', 'firehose'),
+      N('s3', 's3'),
+    ],
+    edges: [
+      E('users', 'bus'),
+      E('bus', 'q'),
+      E('q', 'orders'),
+      E('orders', 'ddb'),
+      E('bus', 'fraud'),
+      E('fraud', 'ddb'),
+      E('bus', 'fh'),
+      E('fh', 's3'),
+    ],
+  })
+
+  const tick = (bus: string) => {
+    const { nodes, edges } = platform(bus)
+    return simulateTick(nodes, edges, RATE, sc)
+  }
+
+  it('routes each rule its own share instead of broadcasting', () => {
+    const s = tick('eventbridge')
+    expect(s.nodeLoads['q'].inRps).toBeCloseTo(RATE * 0.7, 0)
+    expect(s.nodeLoads['fraud'].inRps).toBeCloseTo(RATE * 0.05, 0)
+    expect(s.nodeLoads['fh'].inRps).toBeCloseTo(RATE, 0)
+    // Total counts every delivery the bus made, so 175% of what was published.
+    expect(s.total).toBeCloseTo(RATE * 1.75, 0)
+  })
+
+  it('hands a topic subscriber a full copy of everything, as it always has', () => {
+    const s = tick('sns')
+    for (const id of ['q', 'fraud', 'fh']) expect(s.nodeLoads[id].inRps).toBeCloseTo(RATE, 0)
+    expect(s.total).toBeCloseTo(RATE * 3, 0)
+  })
+
+  it('bills the fraud branch twenty times more behind a topic than behind a bus', () => {
+    const bus = tick('eventbridge')
+    const topic = tick('sns')
+    const fraudBill = (s: TickStats) => SERVICES.lambda.costPerRps * s.nodeLoads['fraud'].processed
+    expect(fraudBill(topic) / fraudBill(bus)).toBeCloseTo(1 / 0.05, 1)
+  })
+
+  it('archives through a delivery stream without a function in the path', () => {
+    const s = tick('eventbridge')
+    // Batched: the bucket takes the whole stream despite a 1,000-rps ceiling
+    // it would otherwise hit, and the events count as archived.
+    expect(RATE).toBeGreaterThan(SERVICES.s3.capacity / 2)
+    expect(s.nodeLoads['s3'].processed).toBeCloseTo(RATE, 0)
+    expect(s.issues).not.toContain('overloaded:S3')
+    expect(s.queueBacklogs['fh']).toBeCloseTo(0, 0)
+  })
+
+  it('refuses to let a bus write to a bucket on its own', () => {
+    const nodes = [N('users', 'users'), N('bus', 'eventbridge'), N('q', 'sqs'), N('c', 'lambda'), N('d', 'dynamodb'), N('s3', 's3')]
+    const edges = [E('users', 'bus'), E('bus', 'q'), E('q', 'c'), E('c', 'd'), E('bus', 's3')]
+    const s = simulateTick(nodes, edges, RATE, sc)
+    expect(s.issues).toContain('bus-needs-delivery-stream')
+    expect(s.nodeLoads['s3'].processed).toBe(0)
+  })
+
+  it('loses everything a rule matched when nothing is wired to that rule', () => {
+    // The archive rule fires at a destination that was never built.
+    const nodes = [N('users', 'users'), N('bus', 'eventbridge'), N('q', 'sqs'), N('c', 'lambda'), N('d', 'dynamodb')]
+    const edges = [E('users', 'bus'), E('bus', 'q'), E('q', 'c'), E('c', 'd')]
+    const s = simulateTick(nodes, edges, RATE, sc)
+    expect(s.issues).toContain('bus-rule-undelivered')
+    // Without this you could win by simply not building a destination: the work
+    // it was supposed to do would vanish along with the branch.
+    expect(s.dropped).toBeGreaterThan(RATE)
+  })
+
+  it('makes a function archiver pay S3 request pricing, so it is no shortcut', () => {
+    // Same job, one PUT per event: the bucket's ceiling bites immediately.
+    const nodes = [N('users', 'users'), N('bus', 'eventbridge'), N('arc', 'lambda'), N('s3', 's3')]
+    const edges = [E('users', 'bus'), E('bus', 'arc'), E('arc', 's3')]
+    const s = simulateTick(nodes, edges, 4000, getScenario('order-storm'))
+    expect(s.nodeLoads['s3'].processed).toBe(SERVICES.s3.capacity)
+    expect(s.issues).toContain('overloaded:S3')
+  })
+
+  it('leaves plain fan-out completely alone in every level without rules', () => {
+    const nodes = [N('users', 'users'), N('gw', 'apigw'), N('sns', 'sns'), N('q', 'sqs'), N('c', 'lambda'), N('d', 'dynamodb')]
+    const edges = [E('users', 'gw'), E('gw', 'sns'), E('sns', 'q'), E('q', 'c'), E('c', 'd')]
+    const storm = simulateTick(nodes, edges, 2000, getScenario('order-storm'))
+    expect(storm.total).toBe(2000) // one subscriber, no extra copies
+    expect(storm.issues).not.toContain('bus-rule-undelivered')
+  })
+})
+
+describe('elastic fleets behind a queue', () => {
+  // Regression: a queue hands a consumer only what it can already take, so a
+  // fleet sizing itself on its own throughput never grows. It has to size
+  // itself on the backlog instead.
+  const nodes = [N('users', 'users'), N('q', 'sqs'), N('c', 'fargate'), N('d', 'dynamodb')]
+  const edges = [E('users', 'q'), E('q', 'c'), E('c', 'd')]
+  const sc = getScenario('order-storm')
+
+  it('reports the backlog waiting for a consumer, not just what it drained', () => {
+    const min = fleetMin('fargate')
+    const s = simulateTick(nodes, edges, 5000, sc, { c: min })
+    const capacity = min * SERVICES.fargate.scaling!.perUnit
+    expect(s.nodeLoads['c'].inRps).toBeCloseTo(capacity, 0)
+    expect(s.nodeLoads['c'].demand).toBeCloseTo(5000, 0)
+    expect(observedLoad(s.nodeLoads['c'])).toBeCloseTo(5000, 0)
+  })
+
+  it('grows the fleet to its ceiling instead of deadlocking at the minimum', () => {
+    let count = fleetMin('fargate')
+    let backlogs: Record<string, number> = {}
+    for (let i = 0; i < 12; i++) {
+      const s = simulateTick(nodes, edges, 1500, sc, { c: count }, backlogs)
+      backlogs = s.queueBacklogs
+      count = nextFleetCount('fargate', count, observedLoad(s.nodeLoads['c']))
+    }
+    // 1,500 rps needs 15 tasks. Reading its own throughput it would still be 2.
+    expect(count).toBeGreaterThanOrEqual(15)
+  })
+
+  it('still sizes a fleet that is NOT behind a queue on its own arrivals', () => {
+    const direct = [N('users', 'users'), N('lb', 'alb'), N('c', 'fargate'), N('d', 'dynamodb')]
+    const directEdges = [E('users', 'lb'), E('lb', 'c'), E('c', 'd')]
+    const s = simulateTick(direct, directEdges, 600, getScenario('photo-app'), { c: 2 })
+    expect(s.nodeLoads['c'].demand).toBeUndefined()
+    expect(observedLoad(s.nodeLoads['c'])).toBeCloseTo(600, 0)
   })
 })

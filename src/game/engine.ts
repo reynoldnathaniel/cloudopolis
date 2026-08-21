@@ -43,6 +43,16 @@ export interface NodeLoad {
   backlog?: number
   /** Scrubbing services (WAF) only: attack rps dropped here this tick */
   blocked?: number
+  /** Object storage only: events written here batched, which cost no requests */
+  delivered?: number
+  /**
+   * Queue consumers only: what the queue actually had waiting for this node,
+   * which is more than `inRps` whenever the node is the bottleneck. Scale a
+   * fleet on this, never on `inRps` — a queue only ever hands a consumer what
+   * it can already take, so a fleet watching its own throughput concludes it is
+   * exactly the right size and never grows.
+   */
+  demand?: number
 }
 
 /**
@@ -110,6 +120,18 @@ const COLD_TIMEOUT_RATE = 0.5
 /** Fleet size a service starts at, or 0 for services that aren't fleets. */
 export const fleetMin = (serviceId: string): number => SERVICES[serviceId]?.scaling?.min ?? 0
 
+/**
+ * What a fleet should size itself against, given last tick's numbers.
+ *
+ * Behind a queue this MUST be the demand rather than the throughput. A queue
+ * hands a consumer only what that consumer can already take, so a fleet reading
+ * its own `inRps` sees its own capacity reflected back, concludes it is exactly
+ * the right size, and sits at two units while a backlog of hundreds of
+ * thousands piles up in front of it.
+ */
+export const observedLoad = (load: NodeLoad | undefined): number =>
+  load === undefined ? 0 : Math.max(load.demand ?? 0, load.inRps)
+
 /** Move a fleet one tick toward what its observed load demands. */
 export function nextFleetCount(serviceId: string, current: number, observedLoad: number): number {
   const s = SERVICES[serviceId]?.scaling
@@ -159,15 +181,22 @@ export function simulateTick(
   // How much of what arrived at each node is the attack. Junk is not tagged in
   // any way your infrastructure can see; this is bookkeeping for the scoreboard.
   const attackIn: Record<string, number> = {}
+  // Events handed to a bucket by a delivery stream, already batched — the one
+  // kind of traffic a bucket takes without paying its per-request ceiling.
+  const storageIn: Record<string, number> = {}
   for (const n of nodes) {
     inLoad[n.id] = 0
     appIn[n.id] = 0
     attackIn[n.id] = 0
+    storageIn[n.id] = 0
   }
 
   const nodeLoads: Record<string, NodeLoad> = {}
   const edgeFlows: Record<string, number> = {}
   const newBacklogs: Record<string, number> = {}
+  // What each queue had waiting for a consumer this tick — reported so elastic
+  // fleets can scale on the backlog instead of on their own throughput.
+  const queueDemand: Record<string, number> = {}
   const newWarm: Record<string, number> = { ...warmCapacity }
   const issues = new Set<string>()
   let served = 0
@@ -342,7 +371,10 @@ export function simulateTick(
         break
       }
       case 'fanout': {
-        // Pub/sub: every healthy subscriber gets its own full copy of each event.
+        // Pub/sub: every healthy subscriber gets its own full copy of each
+        // event — unless this bus routes by rule, in which case each target
+        // gets only the share its rule matched. That difference is the entire
+        // argument for an event bus over a broadcast topic.
         const p = Math.min(L, def.capacity)
         const over = L - p
         drop(over)
@@ -353,16 +385,50 @@ export function simulateTick(
           const r = SERVICES[t.serviceId].role
           return r === 'queue' || r === 'compute'
         })
+        // A bus has no way to write an object. Wiring one straight at a bucket
+        // is the mistake a delivery stream exists to fix, so say so rather than
+        // silently routing nothing there.
+        if (healthyOuts.some((e) => SERVICES[nodeById.get(e.target)!.serviceId].role === 'origin-static')) {
+          issues.add('bus-needs-delivery-stream')
+        }
         if (p > 0) {
           if (subs.length === 0) {
             drop(p)
             issues.add('fanout-no-subscribers')
           } else {
-            extraTotal += p * (1 - attackFrac) * (subs.length - 1)
+            // Unlisted targets get a catch-all rule: everything. A plain topic
+            // has no rules at all, so every share is 1 and this reduces to the
+            // broadcast it has always been.
+            const shareFor = (e: LiteEdge) =>
+              def.rules === true
+                ? (scenario.busRules?.[nodeById.get(e.target)!.serviceId] ?? 1)
+                : 1
+            let shareSum = 0
             for (const e of subs) {
-              edgeFlows[e.id] = (edgeFlows[e.id] ?? 0) + p
-              inLoad[e.target] += p
-              attackIn[e.target] += p * attackFrac
+              const amount = p * shareFor(e)
+              shareSum += shareFor(e)
+              if (amount <= 0) continue
+              edgeFlows[e.id] = (edgeFlows[e.id] ?? 0) + amount
+              inLoad[e.target] += amount
+              attackIn[e.target] += amount * attackFrac
+            }
+            // Every delivery the bus made is an event that has to be handled,
+            // so it counts toward the total. Broadcasting to three subscribers
+            // triples the work; routing 5% of it to one of them does not.
+            extraTotal += p * (1 - attackFrac) * (shareSum - 1)
+
+            // A rule with nothing wired to it still fired — those events were
+            // routed at a destination that does not exist, and they are gone.
+            // Without this you could win by building fewer destinations, since
+            // a branch you never drew is a branch that never costs you.
+            if (def.rules === true && scenario.busRules) {
+              const wired = new Set(subs.map((e) => nodeById.get(e.target)!.serviceId))
+              for (const [serviceId, share] of Object.entries(scenario.busRules)) {
+                if (share <= 0 || wired.has(serviceId)) continue
+                extraTotal += p * (1 - attackFrac) * share
+                drop(p * share)
+                issues.add('bus-rule-undelivered')
+              }
             }
           }
         }
@@ -381,15 +447,33 @@ export function simulateTick(
 
         const consumers = healthyOuts.filter((e) => {
           const t = nodeById.get(e.target)
-          return t !== undefined && SERVICES[t.serviceId].role === 'compute'
+          if (t === undefined) return false
+          const r = SERVICES[t.serviceId].role
+          // A delivery stream drains into storage as happily as into compute —
+          // that is the point of it, there is no function in the path at all.
+          return r === 'compute' || (def.deliversToStorage === true && r === 'origin-static')
         })
         let drained = 0
         if (consumers.length === 0) {
           if (accepted > 0) issues.add('queue-no-consumers')
         } else {
-          const caps = consumers.map((e) => effectiveCapacity(nodeById.get(e.target)!))
+          const caps = consumers.map((e) => {
+            const t = nodeById.get(e.target)!
+            // Delivered events arrive batched: a second of them becomes a
+            // handful of writes, so the bucket's request ceiling never binds
+            // and it takes everything on offer.
+            return SERVICES[t.serviceId].role === 'origin-static'
+              ? available
+              : effectiveCapacity(t)
+          })
           const capSum = caps.reduce((a, b) => a + b, 0)
           drained = Math.min(available, capSum)
+          if (capSum > 0) {
+            // Tell each consumer what was waiting for it, not just what it got.
+            consumers.forEach((e, i) => {
+              queueDemand[e.target] = (queueDemand[e.target] ?? 0) + (available * caps[i]) / capSum
+            })
+          }
           if (drained > 0 && capSum > 0) {
             consumers.forEach((e, i) => {
               const share = (drained * caps[i]) / capSum
@@ -400,6 +484,9 @@ export function simulateTick(
               // scenario that turns the attack on bans buffering outright, so
               // nothing shipped ever drains a mixed backlog.
               attackIn[e.target] += share * attackFrac
+              if (SERVICES[nodeById.get(e.target)!.serviceId].role === 'origin-static') {
+                storageIn[e.target] += share
+              }
             })
           }
         }
@@ -423,17 +510,30 @@ export function simulateTick(
         break
       }
       case 'origin-static': {
-        const p = Math.min(L, def.capacity)
-        const over = L - p
+        // Batched deliveries bypass the request ceiling entirely; everything
+        // else — page requests, or one PUT per event from a function — pays it.
+        const delivered = Math.min(storageIn[id], L)
+        serve(delivered)
+        const direct = L - delivered
+        const p = Math.min(direct, def.capacity)
+        const over = direct - p
         drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
-        if (scenario.need === 'static') {
+        // In an async pipeline a bucket is somewhere events are archived, not
+        // somewhere pages are rendered — so it answers for them.
+        if (scenario.need === 'static' || scenario.async === true) {
           serve(p)
         } else if (p > 0) {
           drop(p)
           issues.add('static-cant-dynamic')
         }
-        nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: L / def.capacity }
+        nodeLoads[id] = {
+          inRps: L,
+          processed: delivered + p,
+          capacity: def.capacity,
+          util: direct / def.capacity,
+          delivered: delivered > 0 ? delivered : undefined,
+        }
         break
       }
       case 'compute': {
@@ -470,7 +570,16 @@ export function simulateTick(
             const t = nodeById.get(e.target)
             if (!t) return false
             const r = SERVICES[t.serviceId].role
-            return r === 'db' || r === 'cache' || r === 'retriever'
+            // In an async pipeline a bucket is a legitimate write target: the
+            // event gets archived rather than rendered. It is still one PUT per
+            // event, though, so it pays S3's request ceiling in full —
+            // batching those writes is exactly what a delivery stream is for.
+            return (
+              r === 'db' ||
+              r === 'cache' ||
+              r === 'retriever' ||
+              (scenario.async === true && r === 'origin-static')
+            )
           })
           const healthyApp = appTargets.filter((e) => !isOffline(e.target))
           if (p > 0) {
@@ -510,7 +619,14 @@ export function simulateTick(
           // In a static scenario a web server can serve files directly.
           serve(p)
         }
-        nodeLoads[id] = { inRps: L, processed: p, capacity: cap, util: L / cap, instances }
+        nodeLoads[id] = {
+          inRps: L,
+          processed: p,
+          capacity: cap,
+          util: L / cap,
+          instances,
+          demand: queueDemand[id],
+        }
         break
       }
       case 'cache': {
@@ -733,7 +849,7 @@ export function securityAudit(nodes: LiteNode[], edges: LiteEdge[]): SecurityFin
       findings.push({
         nodeId: target.id,
         label: `${def.name} exposed to the internet`,
-        tip: `${def.name} is taking events straight from the internet with no authenticated front door. Put API Gateway in front (Kinesis is the exception — its ingest is IAM-authenticated).`,
+        tip: `${def.name} is taking events straight from the internet with no authenticated front door. Put API Gateway in front — or use an ingest service whose own API is IAM-authenticated, like Kinesis, Firehose, or EventBridge.`,
       })
     } else {
       findings.push({
@@ -773,6 +889,10 @@ export const ISSUE_TIPS: Record<string, string> = {
   'fanout-no-subscribers': 'SNS published into the void — no queues or functions are subscribed to it.',
   'queue-no-consumers': 'Your queue has no consumers. Messages are piling up with nothing draining them — connect a compute tier.',
   'queue-overflow': 'The queue backlog overflowed its buffer and events were lost. Add consumer capacity so it drains faster.',
+  'bus-rule-undelivered':
+    'One of the bus rules is firing at a destination you never built, and everything it matched is gone. A rule is a promise that those events land somewhere — every destination in the brief needs a target wired to it.',
+  'bus-needs-delivery-stream':
+    'An event bus cannot write an object — there is no PutEvents target on a bucket. Put a delivery stream between them: it batches the stream and lands it in S3 with none of your code in the path.',
 }
 
 /**

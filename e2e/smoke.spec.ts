@@ -344,6 +344,43 @@ test.describe('SimCloud smoke', () => {
     expect(await rpsIn('sol-rr-1')).toBe(113)
   })
 
+  test('Paper Trail: the bus routes by rule and Firehose archives the lot', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Paper Trail/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    await palette(page, 'Amazon EventBridge').click()
+    await palette(page, 'Amazon SQS').click()
+    await palette(page, 'AWS Lambda (serverless').click()
+    await palette(page, 'AWS Lambda (serverless').click()
+    await palette(page, 'Amazon DynamoDB').click()
+    await palette(page, 'Amazon Data Firehose').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+
+    const n = (id: string) => `.react-flow__node[data-id="${id}"]`
+    await connect(page, n('users'), n('eventbridge-1'))
+    // Orders: 70% of the stream, buffered.
+    await connect(page, n('eventbridge-1'), n('sqs-2'))
+    await connect(page, n('sqs-2'), n('lambda-3'))
+    await connect(page, n('lambda-3'), n('dynamodb-5'))
+    // Fraud: the 5% rule, straight off the bus.
+    await connect(page, n('eventbridge-1'), n('lambda-4'))
+    await connect(page, n('lambda-4'), n('dynamodb-5'))
+    // Archive: everything, with no function in the path.
+    await connect(page, n('eventbridge-1'), n('firehose-6'))
+    await connect(page, n('firehose-6'), n('s3-7'))
+    expect(await edgeCount(page)).toBe(8)
+
+    await page.getByRole('button', { name: /Simulate/ }).click()
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 90_000 })
+
+    await expect(page.getByText('Well-Architected!')).toBeVisible()
+    // Async scoring: nothing lost, nothing left in a queue.
+    await expect(page.getByText('≥98% of events processed by run end')).toBeVisible()
+    await expect(page.getByText('✓ $175/mo')).toBeVisible()
+  })
+
   test('two failed runs unlock the reference answer, which then three-stars', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /Launch Day/ }).click()

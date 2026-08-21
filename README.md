@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 5 tracks, 15 scenarios
+### 5 tracks, 16 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -65,7 +65,7 @@ style you want to learn.
 | --- | --- | --- |
 | ☁️ **Foundations** | Launch Day · PhotoShare · The Migration · FlashSale · IPO Day | CDN caching, load balancing, managed data stores, Multi-AZ redundancy, auto scaling |
 | ⚖️ **Scaling Up** | The Replatform · The Feed | You have outgrown the easy answer. Containers as the middle path — tasks scale twice as fast as VMs, bill in $8 slices, and beat pay-per-request outright at *sustained* load. Then a read/write split: 10% of traffic writes and must reach the one primary, 90% reads and fans out over fixed-size replicas you size for the peak and pay for at the trough |
-| 📨 **Event-Driven** | Order Storm · Trivia Night · Click Stream | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue. Then a firehose you must ingest without paying by the message — Kinesis's flat price against API Gateway's per-request bill |
+| 📨 **Event-Driven** | Order Storm · Trivia Night · Click Stream · Paper Trail | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue. Then a firehose you must ingest without paying by the message — Kinesis's flat price against API Gateway's per-request bill. Then one stream with three destinations that each want a different slice of it — where a topic that broadcasts bills a consumer for every event on the platform to look at one in twenty |
 | 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
 | 🚨 **Day 2** | Game Day · The Shakedown · The Blackout | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live, and every offer is answerable with money — which is the point, because emergency capacity is billed to the same budget you are scored against. Then a botnet, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet. Then the last exam: an entire Region goes dark and the app stays up |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
@@ -108,6 +108,17 @@ style you want to learn.
   options are written so the tempting one costs money and the free one only works if the design was
   already right — a decision punishes the architecture that needed it rather than handing out a
   power-up.
+- **Rule-based routing vs. broadcast** — SNS hands every subscriber a full copy of every event.
+  EventBridge delivers each target only the share its rule matched, from the scenario's `busRules`.
+  Same picture on the canvas; on a consumer that cares about 5% of the stream, twenty times the
+  difference in what it processes and what it bills. A rule wired at nothing still fires, and
+  everything it matched is lost — so you cannot win by building fewer destinations.
+- **Delivery streams** — a `deliversToStorage` queue (Firehose) drains into object storage as well
+  as compute, with no function in the path, and what it delivers arrives *batched*: thousands of
+  events a second land as a handful of writes, so the bucket never feels its 1,000-rps request
+  ceiling. A function doing the same job does one PUT per event and pays it in full. An event bus
+  wired straight at a bucket delivers nothing at all — there is no PutEvents target on S3, and that
+  gap is the whole reason the delivery stream exists.
 - **Attack traffic** — a scenario can declare an `attack`, a flat flood of junk requests arriving
   alongside the real ones during the spike. It is indistinguishable from real traffic once it is
   past the edge, so every capacity ceiling, cache hit ratio, and fan-out split applies to both in
@@ -304,7 +315,6 @@ replaying the level by hand.
 
 ## Roadmap
 
-- EventBridge and Firehose → S3, deepening the Event-Driven track
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---

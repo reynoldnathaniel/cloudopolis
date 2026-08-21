@@ -15,8 +15,10 @@ import {
   blueprintMissing,
   nextFleetCount,
   fleetMin,
+  observedLoad,
   type LiteNode,
   type LiteEdge,
+  type NodeLoad,
 } from './engine'
 import { SCENARIOS, getScenario, type Scenario } from './scenarios'
 import { SERVICES } from './services'
@@ -125,7 +127,7 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
   const expire = (fx: { factor: number; ticksLeft: number }[]) =>
     fx.map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 })).filter((e) => e.ticksLeft > 0)
   let attackBillPeak = 0
-  let prevLoads: Record<string, { inRps: number }> = {}
+  let prevLoads: Record<string, NodeLoad> = {}
   let prevRps = 0
   let cost = 0
   let missing: string[] = scenario.requiredServices ? scenario.requiredServices.slice() : []
@@ -185,7 +187,7 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
 
       for (const id of Object.keys(fleets)) {
         const svc = nodes.find((n) => n.id === id)!.serviceId
-        fleets[id] = nextFleetCount(svc, fleets[id], prevLoads[id]?.inRps ?? 0)
+        fleets[id] = nextFleetCount(svc, fleets[id], observedLoad(prevLoads[id]))
       }
 
       if (ph.name === 'probe' && findings === null) {

@@ -128,6 +128,14 @@ export interface Scenario {
    * the entire point, since it is what catches a function cold.
    */
   bursts?: { onTicks: number; offTicks: number }
+  /**
+   * What a rule-routing event bus (EventBridge) delivers to each kind of
+   * target, as a fraction of everything published: `{ lambda: 0.05 }` means the
+   * rule pointing at a function matched 5% of the stream. Anything not listed
+   * gets a catch-all rule and receives the lot. Ignored by plain fan-out
+   * (SNS), which has no rules and always broadcasts a full copy.
+   */
+  busRules?: Record<string, number>
   /** Incidents that interrupt the run and ask the player to decide, live. */
   decisions?: Decision[]
   /**
@@ -417,6 +425,33 @@ export const SCENARIOS: Scenario[] = [
       'API Gateway charges per request. At 500 RPS sustained, that alone is $50/mo — do the math against your budget.',
       'Kinesis is a durable, IAM-authenticated front door built exactly for this: high-volume ingest at a flat price.',
       'The pipeline: Kinesis → Lambda consumers → SageMaker endpoint for scoring.',
+    ],
+  },
+  {
+    id: 'paper-trail',
+    track: 'event-driven',
+    order: 4,
+    difficulty: 3,
+    title: 'Paper Trail',
+    emoji: '🧾',
+    hook: 'One stream, three destinations, three completely different appetites.',
+    brief:
+      'Compliance has landed on your events platform and the new rule is absolute: every event the business emits gets archived, forever, and nobody is allowed to write the code that does it. Meanwhile the orders pipeline keeps running, and the fraud team wants their slice — about one event in twenty — the moment it happens. Three destinations, and only one of them wants everything. The question is whether your delivery mechanism knows the difference, because there is a version of this design where the fraud team is billed for every event on the platform to look at five percent of them.',
+    need: 'app',
+    async: true,
+    baselineRps: 800,
+    spikeRps: 2400,
+    spikeLabel: '🧾 End of quarter — every system reports at once!',
+    budget: 200,
+    hasProbe: true,
+    // The bus's three rules: orders, the fraud subset, and the catch-all
+    // archive. A plain topic ignores all of this and hands out full copies.
+    busRules: { sqs: 0.7, lambda: 0.05, firehose: 1 },
+    requiredServices: ['eventbridge', 'firehose', 's3'],
+    goalHints: [
+      'SNS broadcasts, EventBridge routes. A topic hands every subscriber a full copy of everything; a bus delivers each target only what its rule matched — and a function you hand 100% of the stream bills you for 100% of the stream.',
+      'The archive rule matches everything, the orders rule about 70%, and the fraud rule about 5%. Only one consumer here should be seeing the whole firehose.',
+      'Nobody may write the archiver, and a bus cannot write an object by itself. A delivery stream is the piece in between: flat price, batches the stream into the bucket, no function in the path.',
     ],
   },
   // ----------------------------------------------------------------- GenAI

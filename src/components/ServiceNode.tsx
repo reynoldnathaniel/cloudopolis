@@ -152,6 +152,13 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
               <span className="font-bold text-emerald-400">
                 🛡 {Math.round(stats.blocked ?? 0).toLocaleString()} blocked
               </span>
+            ) : (stats.delivered ?? 0) > 0 ? (
+              // A bucket taking batched deliveries is not using its request
+              // budget at all, and "0%" beside a number bigger than its own
+              // ceiling reads as a bug rather than as the point.
+              <span className="font-bold text-sky-300">
+                📦 {Math.round(stats.delivered ?? 0).toLocaleString()} batched
+              </span>
             ) : (
               <span className={overloaded ? 'font-bold text-red-400' : ''}>
                 {overloaded ? (isAsg ? 'SCALING UP…' : 'OVERLOAD') : isAsg ? `${utilPct}%` : def.autoScales ? 'scaling' : `${utilPct}%`}

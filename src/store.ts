@@ -17,6 +17,7 @@ import {
   blueprintMissing,
   nextFleetCount,
   fleetMin,
+  observedLoad,
   ATTACK_ADVICE,
   type NodeLoad,
   type LiteNode,
@@ -816,7 +817,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         const prevStats = get().nodeStats
         for (const id of Object.keys(fleetCounts)) {
           const svc = serviceIdOf(nodes.find((n) => n.id === id)!)
-          fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], prevStats[id]?.inRps ?? 0)
+          fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], observedLoad(prevStats[id]))
         }
 
         const stats = simulateTick(lite, toLiteEdges(edges), sandboxRps, live, fleetCounts, backlogs, warm)
@@ -1048,7 +1049,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       const prevStats = get().nodeStats
       for (const id of Object.keys(fleetCounts)) {
         const svc = serviceIdOf(nodes.find((n) => n.id === id)!)
-        fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], prevStats[id]?.inRps ?? 0)
+        fleetCounts[id] = nextFleetCount(svc, fleetCounts[id], observedLoad(prevStats[id]))
       }
 
       // The probe audits the design once, the moment the phase begins.

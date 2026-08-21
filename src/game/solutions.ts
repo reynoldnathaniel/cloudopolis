@@ -222,6 +222,34 @@ export const SOLUTIONS: Record<string, Solution> = {
     ],
   },
 
+  'paper-trail': {
+    // Three branches off the bus, stacked so each rule reads as its own row.
+    nodes: [
+      { key: 'eventbridge', serviceId: 'eventbridge', x: 260, y: 250 },
+      { key: 'sqs', serviceId: 'sqs', x: 470, y: 90 },
+      { key: 'orders', serviceId: 'lambda', x: 670, y: 90 },
+      { key: 'fraud', serviceId: 'lambda', x: 470, y: 250 },
+      { key: 'dynamodb', serviceId: 'dynamodb', x: 880, y: 170 },
+      { key: 'firehose', serviceId: 'firehose', x: 470, y: 410 },
+      { key: 's3', serviceId: 's3', x: 670, y: 410 },
+    ],
+    edges: [
+      ['users', 'eventbridge'],
+      ['eventbridge', 'sqs'],
+      ['sqs', 'orders'],
+      ['orders', 'dynamodb'],
+      ['eventbridge', 'fraud'],
+      ['fraud', 'dynamodb'],
+      ['eventbridge', 'firehose'],
+      ['firehose', 's3'],
+    ],
+    notes: [
+      'EventBridge routes; SNS would broadcast. The fraud function sits on a rule that matches 5% of the stream, so it receives 5% and bills for 5%. Behind a topic the identical function receives every event on the platform to look at one in twenty — same picture on the canvas, twenty times the invoice on that branch.',
+      'Firehose archives without a line of code: it batches the stream straight into the bucket. Wire the bus at S3 directly and nothing lands — a bus has no way to write an object, and that gap is the whole reason the delivery stream exists.',
+      'Because the delivery is batched, the bucket never feels its own per-request ceiling. A function doing the same job would do one PUT per event, pay per invocation, and be the most expensive thing in the design.',
+    ],
+  },
+
   'click-stream': {
     nodes: chain('kinesis', 'lambda', 'sagemaker'),
     edges: link('users', 'kinesis', 'lambda', 'sagemaker'),

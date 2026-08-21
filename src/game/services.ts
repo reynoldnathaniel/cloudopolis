@@ -88,6 +88,18 @@ export interface ServiceDef {
    * an ordinary pass-through router.
    */
   scrubsAttack?: boolean
+  /**
+   * Routes by rule instead of broadcasting: each target receives only the share
+   * of events its rule matched, from the scenario's `busRules`. A plain fan-out
+   * hands every subscriber a full copy of everything.
+   */
+  rules?: boolean
+  /**
+   * A delivery stream: it can drain into object storage as well as compute, and
+   * what it delivers arrives *batched* — thousands of events per second land as
+   * a handful of writes, so the bucket's per-request ceiling never binds.
+   */
+  deliversToStorage?: boolean
   blurb: string
 }
 
@@ -383,6 +395,41 @@ export const SERVICES: Record<string, ServiceDef> = {
     zonal: false,
     blurb: 'Publish once, deliver everywhere: every subscriber gets its own copy of each event.',
   },
+  eventbridge: {
+    id: 'eventbridge',
+    name: 'EventBridge',
+    fullName: 'Amazon EventBridge (event bus)',
+    abbr: 'EB',
+    category: 'integration',
+    role: 'fanout',
+    monthlyCost: 10,
+    costPerRps: 0,
+    capacity: 1000000,
+    autoScales: true,
+    zonal: false,
+    edgeSafe: true,
+    rules: true,
+    blurb:
+      'An event bus that routes by rule. Each target gets only the events its rule matched — not a copy of everything. That is the whole difference from SNS: a consumer that cares about 5% of your traffic receives 5% of your traffic, and is billed for 5% of your traffic. PutEvents is IAM-authenticated, so producers can write straight to it.',
+  },
+  firehose: {
+    id: 'firehose',
+    name: 'Firehose',
+    fullName: 'Amazon Data Firehose (delivery stream)',
+    abbr: 'FH',
+    category: 'analytics',
+    role: 'queue',
+    monthlyCost: 30,
+    costPerRps: 0,
+    capacity: 1000000,
+    autoScales: true,
+    zonal: false,
+    bufferSize: 500000,
+    edgeSafe: true,
+    deliversToStorage: true,
+    blurb:
+      'Managed delivery to storage: point it at a bucket and it batches the stream and writes it there, with no code of yours in the path. Flat price no matter the volume — and because it batches, a bucket behind it never feels the per-request ceiling. This is what archiving looks like when you are not paying a function to do it.',
+  },
   kinesis: {
     id: 'kinesis',
     name: 'Kinesis',
@@ -466,7 +513,10 @@ export const PALETTE_GROUPS: PaletteGroup[] = [
     label: 'Data',
     items: [SERVICES.s3, SERVICES.rds, SERVICES['rds-replica'], SERVICES.dynamodb, SERVICES.elasticache],
   },
-  { label: 'Messaging & Streaming', items: [SERVICES.sqs, SERVICES.sns, SERVICES.kinesis] },
+  {
+    label: 'Messaging & Streaming',
+    items: [SERVICES.sqs, SERVICES.sns, SERVICES.eventbridge, SERVICES.kinesis, SERVICES.firehose],
+  },
   { label: 'AI', items: [SERVICES.opensearch, SERVICES.bedrock, SERVICES.sagemaker] },
 ]
 
