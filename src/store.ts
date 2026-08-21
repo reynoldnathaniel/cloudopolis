@@ -98,6 +98,16 @@ export interface TickPoint {
 
 export type Screen = 'menu' | 'select' | 'game' | 'editor'
 
+/** A canvas we can go back to. The graph is a handful of nodes, so whole
+ *  snapshots are simpler and safer than inverse patches, and cost nothing. */
+export interface CanvasSnapshot {
+  nodes: Node[]
+  edges: Edge[]
+}
+
+/** Plenty for a design session, and a hard stop on unbounded growth. */
+export const HISTORY_LIMIT = 30
+
 interface GameStore {
   screen: Screen
   /** Current tutorial step index, or null when the tutorial is off */
@@ -135,6 +145,18 @@ interface GameStore {
   /** Completed runs that fell short of 3 stars, per scenario id (persisted).
    *  Two of them unlock the reference-answer reveal. */
   failedRuns: Record<string, number>
+  /** Canvases we can undo back to, oldest first. Not persisted: resuming into
+   *  a stack of edits you do not remember making is worse than no history. */
+  past: CanvasSnapshot[]
+  /** Canvases redo can walk forward into; discarded by any fresh edit. */
+  future: CanvasSnapshot[]
+  /**
+   * The canvas as it was when the current drag began, or null when nothing is
+   * being dragged. React Flow reports a drag as a stream of position changes —
+   * one per frame — so this is what turns a hundred of those into the single
+   * history entry a person would expect from having moved one node once.
+   */
+  dragSnapshot: CanvasSnapshot | null
   /** Badge ids earned so far (persisted) */
   achievements: string[]
   /** Badges earned just now, queued for the toast. Transient. */
@@ -213,6 +235,17 @@ interface GameStore {
   /** Replace the canvas with the scenario's reference 3-star design. Destructive. */
   revealSolution: () => void
   dismissSolutionNotes: () => void
+  /** Step the canvas back to before the last committed edit. Edit phase only. */
+  undo: () => void
+  /** Step forward again, until the next edit discards the branch. */
+  redo: () => void
+  /** Remember the canvas as it is now, so the edit about to happen can be undone.
+   *  Call it BEFORE mutating. Drags call it on drag-start instead. */
+  commitHistory: (snapshot?: CanvasSnapshot) => void
+  /** Remember the canvas before a node drag starts. */
+  beginDrag: () => void
+  /** Commit that drag as one entry — unless nothing actually moved. */
+  endDrag: () => void
   /** Award a badge that is earned by doing something rather than by scoring. */
   unlockAchievement: (id: string) => void
   /** Clear the toast queue once it has been shown. */
@@ -412,6 +445,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   bestStars: SAVED.bestStars ?? {},
   // Milestones are recomputed from the star record on load, so anyone who
   // already finished a track before badges existed has it waiting for them.
+  past: [],
+  future: [],
+  dragSnapshot: null,
   achievements: [
     ...new Set([
       ...(Array.isArray(SAVED.achievements) ? SAVED.achievements : []),
@@ -612,6 +648,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (get().scenarioId !== id) set({ tutorialStep: null })
     set({
       scenarioId: id,
+      // A new canvas gets a new history: undoing across a scenario switch would
+      // paste one level's design onto another.
+      past: [],
+      future: [],
+      dragSnapshot: null,
       briefingOpen: get().tutorialStep === null && !get().briefingSeen.includes(id),
       phase: 'edit',
       nodes: initialNodesFor(getScenario(id)),
@@ -643,6 +684,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const { edges } = get()
     if (!flow || conn.source === conn.target) return
     if (edges.some((e) => e.source === conn.source && e.target === conn.target)) return
+    get().commitHistory()
     set({ edges: flow.addEdge({ ...conn, type: 'traffic' }, edges) })
   },
 
@@ -650,6 +692,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const scenario = get().scenario()
     if (scenario.banned?.includes(serviceId)) return
     const def = SERVICES[serviceId]
+    get().commitHistory()
     idCounter += 1
 
     const node: Node = {
@@ -718,6 +761,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   assignZone: (nodeId, az, position) => {
+    // A drag that ends in a different box already pushed its own entry on
+    // drag-start; this covers assignZone called on its own (drag-and-drop from
+    // the palette lands here without ever being a drag on the canvas).
+    if (!get().dragSnapshot) get().commitHistory()
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== nodeId) return n
@@ -733,6 +780,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   assignRegion: (nodeId, region, position) => {
+    if (!get().dragSnapshot) get().commitHistory()
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== nodeId) return n
@@ -757,6 +805,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const solution = SOLUTIONS[scenarioId]
     if (!solution) return
     get().stopRun()
+    // Undoable on purpose: showing someone the answer is the single most
+    // destructive thing this app does to a canvas, and "put it back" is the
+    // obvious next thought.
+    get().commitHistory()
 
     const scenario = getScenario(scenarioId)
     // Solution nodes carry container-relative positions, so the parent boxes
@@ -808,6 +860,60 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   dismissSolutionNotes: () => set({ solutionNotes: null }),
+
+  commitHistory: (snapshot) => {
+    const { nodes, edges, past } = get()
+    const entry = snapshot ?? { nodes, edges }
+    set({
+      past: [...past, entry].slice(-HISTORY_LIMIT),
+      // Any fresh edit abandons the branch you had redone away from.
+      future: [],
+    })
+  },
+
+  // Undo is edit-phase only. Rewriting the canvas underneath a running
+  // simulation would desync it from the tick loop, which holds its own node
+  // list — same reason the presenter controls stand down during an incident.
+  beginDrag: () => {
+    const { nodes, edges } = get()
+    set({ dragSnapshot: { nodes, edges } })
+  },
+
+  endDrag: () => {
+    const snapshot = get().dragSnapshot
+    set({ dragSnapshot: null })
+    if (!snapshot) return
+    // A click registers as a zero-distance drag. Spending an undo on one would
+    // mean pressing ctrl-Z and watching nothing happen, which reads as broken.
+    const layout = (list: Node[]) =>
+      list.map((n) => `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)}:${n.parentId ?? ''}`).join('|')
+    if (layout(snapshot.nodes) === layout(get().nodes)) return
+    get().commitHistory(snapshot)
+  },
+
+  undo: () => {
+    const { past, nodes, edges, phase } = get()
+    if (phase !== 'edit' || past.length === 0) return
+    const previous = past[past.length - 1]
+    set({
+      nodes: previous.nodes,
+      edges: previous.edges,
+      past: past.slice(0, -1),
+      future: [{ nodes, edges }, ...get().future].slice(0, HISTORY_LIMIT),
+    })
+  },
+
+  redo: () => {
+    const { future, nodes, edges, phase } = get()
+    if (phase !== 'edit' || future.length === 0) return
+    const [next, ...rest] = future
+    set({
+      nodes: next.nodes,
+      edges: next.edges,
+      past: [...get().past, { nodes, edges }].slice(-HISTORY_LIMIT),
+      future: rest,
+    })
+  },
 
   unlockAchievement: (id) => {
     const { achievements } = get()
@@ -1423,6 +1529,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
   clearCanvas: () => {
     get().stopRun()
+    get().commitHistory()
     set({
       nodes: initialNodesFor(get().scenario()),
       edges: [],

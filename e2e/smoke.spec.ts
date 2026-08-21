@@ -108,6 +108,48 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ $15/mo')).toBeVisible()
   })
 
+  test('undo and redo walk the canvas back one edit at a time', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    const services = () => page.locator('.react-flow__node[data-id]:not([data-id="users"])')
+    const undo = page.getByRole('button', { name: 'Undo' })
+    const redo = page.getByRole('button', { name: 'Redo' })
+
+    // Nothing done yet, nothing to undo.
+    await expect(undo).toBeDisabled()
+    await expect(redo).toBeDisabled()
+
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon S3').click()
+    await palette(page, 'Application Load Balancer').click()
+    await expect(services()).toHaveCount(3)
+    await expect(undo).toBeEnabled()
+
+    await undo.click()
+    await undo.click()
+    await expect(services()).toHaveCount(1)
+    await expect(redo).toBeEnabled()
+
+    await redo.click()
+    await expect(services()).toHaveCount(2)
+
+    // A fresh edit abandons the branch redo was holding.
+    await palette(page, 'Amazon Route 53').click()
+    await expect(services()).toHaveCount(3)
+    await expect(redo).toBeDisabled()
+
+    // Wiring is a step too, and the keyboard drives it.
+    await fitView(page)
+    await connect(page, '.react-flow__node[data-id="users"]', '.react-flow__node[data-id^="cloudfront"]')
+    expect(await edgeCount(page)).toBe(1)
+    await page.keyboard.press('Control+z')
+    expect(await edgeCount(page)).toBe(0)
+    await page.keyboard.press('Control+y')
+    expect(await edgeCount(page)).toBe(1)
+  })
+
   test('achievements: a run pops a toast, and the gallery remembers it', async ({ page }) => {
     // Four of the five Foundations already three-starred, and no achievements
     // key at all — so this also proves milestones unlock retroactively for a

@@ -158,6 +158,25 @@ cannot run before a canvas exists. `GameScreen` hands them over via `provideFlow
   Drain** instead of instant service.
 - **VPC, Availability Zone, and Region containers** — React Flow subflows with drag re-parenting.
 
+### Undo / redo
+
+⌘Z / Ctrl+Z and ⌘⇧Z / Ctrl+Y, or the ↶ ↷ buttons on the canvas controls. Adding a service,
+deleting one, drawing an edge, moving a node, clearing the canvas and revealing the reference
+answer are all one step each.
+
+The work is in deciding what "one step" means. React Flow reports a drag as a stream of position
+changes — one per frame — plus changes for pure-UI events like selection, so committing history on
+every change would give you an undo stack that walks a node back across the canvas a pixel at a
+time. History is therefore a list of **commits** rather than a change log: a drag records the
+canvas on drag-*start* and commits it on drag-*stop*, and commits nothing at all if the node did
+not actually move, since a plain click is a zero-distance drag and pressing undo afterwards should
+not sit there doing nothing.
+
+Undo is disabled during a run — rewriting the canvas underneath the tick loop would desync it —
+and the history is dropped when you switch scenarios, so undo can never paste one level's design
+onto another. It is deliberately not persisted: resuming into a stack of edits you do not remember
+making is worse than having no history.
+
 ### Achievements
 
 Fourteen badges, behind a `🏆` button on the scenario screen. Locked ones are shown with their
@@ -357,7 +376,7 @@ replaying the level by hand.
 
 ## Roadmap
 
-- Korean localization · sound effects · undo/redo
+- Korean localization · sound effects
 
 ---
 

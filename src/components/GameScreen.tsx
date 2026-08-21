@@ -3,7 +3,7 @@
 // of all, which is the single biggest dependency in the project — is in the
 // chunk that paints the main menu.
 
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -100,6 +100,12 @@ function Canvas() {
   const sandboxTourActive = useGameStore((s) => s.sandboxTutorialStep !== null)
   // The reference-answer card takes the same bottom-center slot as the hint line.
   const notesOpen = useGameStore((s) => s.solutionNotes !== null)
+  const beginDrag = useGameStore((s) => s.beginDrag)
+  const endDrag = useGameStore((s) => s.endDrag)
+  const undo = useGameStore((s) => s.undo)
+  const redo = useGameStore((s) => s.redo)
+  const canUndo = useGameStore((s) => s.past.length > 0)
+  const canRedo = useGameStore((s) => s.future.length > 0)
   const { screenToFlowPosition, getInternalNode, getNodesBounds } = useReactFlow()
 
   const onDrop = useCallback(
@@ -174,6 +180,38 @@ function Canvas() {
     [hasVpc, multiRegion, getInternalNode, assignZone, assignRegion],
   )
 
+  // React Flow fires onNodesChange for every frame of a drag, plus for pure-UI
+  // changes like selection. Committing history there would give you an undo
+  // stack that walks a node back across the canvas one pixel at a time, so the
+  // drag boundary is what gets recorded instead — once, and only if it moved.
+  const onNodeDragStart = useCallback(() => beginDrag(), [beginDrag])
+  const onNodeDragStopCommit: OnNodeDrag = useCallback(
+    (e, node, nodes) => {
+      onNodeDragStop(e, node, nodes)
+      endDrag()
+    },
+    [onNodeDragStop, endDrag],
+  )
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      // The scenario editor has real text fields; leave their own undo alone.
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
+
   const isValidConnection: IsValidConnection = useCallback(
     (conn) => conn.source !== conn.target,
     [],
@@ -187,7 +225,8 @@ function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeDragStop={onNodeDragStop}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStopCommit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         isValidConnection={isValidConnection}
@@ -202,6 +241,22 @@ function Canvas() {
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.5} color="#1e293b" />
         <Controls position="bottom-left" showInteractive={false}>
+          <ControlButton
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (⌘Z / Ctrl+Z)"
+            aria-label="Undo"
+          >
+            ↶
+          </ControlButton>
+          <ControlButton
+            onClick={redo}
+            disabled={!canRedo}
+            title="Redo (⌘⇧Z / Ctrl+Y)"
+            aria-label="Redo"
+          >
+            ↷
+          </ControlButton>
           <ControlButton
             onClick={() =>
               void exportCanvasPng(getNodesBounds(nodes), scenarioTitle).then(
