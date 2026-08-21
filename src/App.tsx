@@ -13,6 +13,7 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { useGameStore } from './store'
 import { MenuScreen } from './components/MenuScreen'
+import { AchievementToast } from './components/AchievementToast'
 
 const GameScreen = () => import('./components/GameScreen')
 const ScenarioSelect = () => import('./components/ScenarioSelect')
@@ -56,17 +57,24 @@ export default function App() {
     return () => window.clearTimeout(id)
   }, [screen])
 
-  if (screen === 'menu') return <MenuScreen />
-
+  // The toast lives outside the Suspense boundary so a badge earned at the end
+  // of a run survives the walk back to the menu or the scenario list.
   return (
-    <Suspense fallback={<Loading />}>
-      {screen === 'select' ? (
-        <LazyScenarioSelect />
-      ) : screen === 'editor' ? (
-        <LazyScenarioEditor />
+    <>
+      {screen === 'menu' ? (
+        <MenuScreen />
       ) : (
-        <LazyGameScreen />
+        <Suspense fallback={<Loading />}>
+          {screen === 'select' ? (
+            <LazyScenarioSelect />
+          ) : screen === 'editor' ? (
+            <LazyScenarioEditor />
+          ) : (
+            <LazyGameScreen />
+          )}
+        </Suspense>
       )}
-    </Suspense>
+      <AchievementToast />
+    </>
   )
 }

@@ -203,7 +203,11 @@ function Canvas() {
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.5} color="#1e293b" />
         <Controls position="bottom-left" showInteractive={false}>
           <ControlButton
-            onClick={() => void exportCanvasPng(getNodesBounds(nodes), scenarioTitle)}
+            onClick={() =>
+              void exportCanvasPng(getNodesBounds(nodes), scenarioTitle).then(
+                (ok) => ok && useGameStore.getState().unlockAchievement('show-and-tell'),
+              )
+            }
             title="Download this architecture as a PNG"
             aria-label="Export architecture as PNG"
           >

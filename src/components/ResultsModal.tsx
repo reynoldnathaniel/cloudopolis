@@ -283,6 +283,7 @@ export function ResultsModal() {
                   origin: window.location.host,
                 })
                 setShot(ok ? 'done' : 'idle')
+                if (ok) useGameStore.getState().unlockAchievement('show-and-tell')
                 setTimeout(() => setShot('idle'), 2500)
               }}
               disabled={shot === 'working'}

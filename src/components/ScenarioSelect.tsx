@@ -3,6 +3,8 @@ import { motion } from 'framer-motion'
 import { TRACKS, scenariosInTrack, type Scenario } from '../game/scenarios'
 import { encodeShareCode, parseScenarioFile } from '../game/customScenarios'
 import { useGameStore } from '../store'
+import { ACHIEVEMENTS } from '../game/achievements'
+import { AchievementGallery } from './AchievementGallery'
 
 function Dots({ n }: { n: 1 | 2 | 3 }) {
   return (
@@ -178,9 +180,12 @@ export function ScenarioSelect() {
   const currentId = useGameStore((s) => s.scenarioId)
   // Re-render the custom section when authored scenarios change.
   const customCount = useGameStore((s) => s.customScenarios.length)
+  const earned = useGameStore((s) => s.achievements.length)
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   return (
     <div className="h-screen w-screen overflow-y-auto bg-slate-950 text-slate-100">
+      <AchievementGallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
       <div className="mx-auto max-w-3xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -192,6 +197,12 @@ export function ScenarioSelect() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={() => setGalleryOpen(true)}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-amber-500/60 hover:text-amber-300"
+            >
+              🏆 {earned} / {ACHIEVEMENTS.length}
+            </button>
             <button
               onClick={openSandbox}
               className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-cyan-500/60 hover:text-cyan-300"

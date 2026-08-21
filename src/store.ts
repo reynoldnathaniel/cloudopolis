@@ -27,6 +27,7 @@ import { getScenario, SANDBOX_ID, type Decision, type Scenario } from './game/sc
 // must stay above the saved-game validation below (imports run before body).
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
 import { SOLUTIONS, hasSolution, REVEAL_AFTER_FAILURES } from './game/solutions'
+import { achievementsAfter, type RunSummary } from './game/achievements'
 import { TUTORIAL_STEPS } from './game/tutorial'
 import { SANDBOX_TUTORIAL_STEPS } from './game/sandboxTutorial'
 
@@ -134,6 +135,10 @@ interface GameStore {
   /** Completed runs that fell short of 3 stars, per scenario id (persisted).
    *  Two of them unlock the reference-answer reveal. */
   failedRuns: Record<string, number>
+  /** Badge ids earned so far (persisted) */
+  achievements: string[]
+  /** Badges earned just now, queued for the toast. Transient. */
+  newAchievements: string[]
   /** Notes from a revealed solution, shown until dismissed; null when none is showing */
   solutionNotes: string[] | null
   /** Player finished the tutorial at least once (persisted) */
@@ -208,6 +213,10 @@ interface GameStore {
   /** Replace the canvas with the scenario's reference 3-star design. Destructive. */
   revealSolution: () => void
   dismissSolutionNotes: () => void
+  /** Award a badge that is earned by doing something rather than by scoring. */
+  unlockAchievement: (id: string) => void
+  /** Clear the toast queue once it has been shown. */
+  clearNewAchievements: () => void
   startRun: () => void
   /** Freeze / unfreeze the running simulation */
   togglePause: () => void
@@ -343,6 +352,7 @@ interface SaveData {
   tutorialDone?: boolean
   sandboxTutorialDone?: boolean
   briefingSeen?: string[]
+  achievements?: string[]
 }
 
 const loadSave = (): SaveData => {
@@ -400,6 +410,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   deadNodeIds: [],
   breachedNodeIds: [],
   bestStars: SAVED.bestStars ?? {},
+  // Milestones are recomputed from the star record on load, so anyone who
+  // already finished a track before badges existed has it waiting for them.
+  achievements: [
+    ...new Set([
+      ...(Array.isArray(SAVED.achievements) ? SAVED.achievements : []),
+      ...achievementsAfter(SAVED.bestStars ?? {}),
+    ]),
+  ],
+  newAchievements: [],
   failedRuns: SAVED.failedRuns ?? {},
   solutionNotes: null,
   tutorialDone: SAVED.tutorialDone === true,
@@ -522,6 +541,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   closeEditor: () => set({ screen: 'select', editingScenarioId: null }),
 
   saveCustomScenario: (scenario, play, markSeen) => {
+    get().unlockAchievement('level-designer')
     const list = get().customScenarios
     const exists = list.some((s) => s.id === scenario.id)
     // New scenarios go to the end of the track; edits keep their slot.
@@ -789,6 +809,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
   dismissSolutionNotes: () => set({ solutionNotes: null }),
 
+  unlockAchievement: (id) => {
+    const { achievements } = get()
+    if (achievements.includes(id)) return
+    set({ achievements: [...achievements, id], newAchievements: [...get().newAchievements, id] })
+  },
+
+  clearNewAchievements: () => set({ newAchievements: [] }),
+
   startRun: () => {
     const state = get()
     if (state.phase === 'run') return
@@ -946,6 +974,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // One sample per tick; published to the store once, when the run ends.
     const history: TickPoint[] = []
     let blueprintMiss: string[] | null = scenario.requiredServices ? scenario.requiredServices.slice() : null
+
+    // Snapshot the star record before this run touches it: "first completed
+    // attempt" and "already beat you twice" both have to mean *before now*.
+    const priorFailures = get().failedRuns[scenario.id] ?? 0
+    const priorBest = get().bestStars[scenario.id] ?? 0
+    const firstAttempt = priorBest === 0 && priorFailures === 0
+    // Services only: the Users node and the container boxes are scenery, not
+    // design decisions, so they cannot count against Minimalist.
+    const placedNodes = state.nodes.filter((n) => n.type === 'service').length
 
     // ---- mid-run decisions ----
     // Each incident fires once, freezes the run, and leaves behind effects that
@@ -1239,14 +1276,31 @@ export const useGameStore = create<GameStore>()((set, get) => ({
             )
           }
 
+          const nextBestStars = {
+            ...get().bestStars,
+            [scenario.id]: Math.max(get().bestStars[scenario.id] ?? 0, stars),
+          }
+          const summary: RunSummary = {
+            scenario,
+            stars,
+            cost: scoredCost,
+            nodeCount: placedNodes,
+            priorFailures,
+            priorBest,
+            firstAttempt,
+            decisions: decisionLog.length,
+            decisionsAutoAnswered: decisionLog.filter((d) => d.auto).length,
+          }
+          const already = get().achievements
+          const fresh = achievementsAfter(nextBestStars, summary).filter((a) => !already.includes(a))
+
           set({
             phase: 'results',
             paused: false,
             runHistory: history,
-            bestStars: {
-              ...get().bestStars,
-              [scenario.id]: Math.max(get().bestStars[scenario.id] ?? 0, stars),
-            },
+            achievements: fresh.length ? [...already, ...fresh] : already,
+            newAchievements: fresh,
+            bestStars: nextBestStars,
             // Only completed runs count, and only short ones. Two of these
             // unlock the reference answer for this scenario.
             failedRuns:
@@ -1405,6 +1459,7 @@ useGameStore.subscribe(() => {
           tutorialDone: s.tutorialDone,
           sandboxTutorialDone: s.sandboxTutorialDone,
           briefingSeen: s.briefingSeen,
+          achievements: s.achievements,
         }),
       )
     } catch {

@@ -158,6 +158,27 @@ cannot run before a canvas exists. `GameScreen` hands them over via `provideFlow
   Drain** instead of instant service.
 - **VPC, Availability Zone, and Region containers** — React Flow subflows with drag re-parenting.
 
+### Achievements
+
+Fourteen badges, behind a `🏆` button on the scenario screen. Locked ones are shown with their
+description rather than hidden — they are meant to read as things worth trying.
+
+The rule every one of them passes: **it has to be possible to miss while still three-starring**, or
+else be a collection milestone. A badge that fires on every three-star run is just a second star
+rating in a different font, which is why there is none for "passed the security probe" or "did not
+pay the ransom" — both are already required to three-star the levels they belong to.
+
+- **Milestones** — one for your first three stars, one per track, one for a clean sweep. These are
+  recomputed from your star record rather than latched, so they unlock retroactively.
+- **Feats** — three-star on your first attempt (or, conversely, on a level that already beat you
+  twice), come in 40% under budget, match the reference answer's service count, or clear a Day 2
+  level answering every incident before the clock.
+- **Two for doing rather than scoring** — export an image, and write a scenario of your own.
+
+The whole rule set is one pure function in `src/game/achievements.ts`, so `achievements.test.ts`
+exercises it without a store or a canvas — mostly with negative assertions, since "does not fire"
+is the property that matters.
+
 ### Getting unstuck
 
 Fail the same scenario twice and the results modal offers **📖 Reveal a 3-star answer**: it
@@ -336,7 +357,7 @@ replaying the level by hand.
 
 ## Roadmap
 
-- Korean localization · achievements · sound effects · undo/redo
+- Korean localization · sound effects · undo/redo
 
 ---
 

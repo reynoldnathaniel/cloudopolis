@@ -108,6 +108,54 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ $15/mo')).toBeVisible()
   })
 
+  test('achievements: a run pops a toast, and the gallery remembers it', async ({ page }) => {
+    // Four of the five Foundations already three-starred, and no achievements
+    // key at all — so this also proves milestones unlock retroactively for a
+    // profile that predates them.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'simcloud-save-v1',
+        JSON.stringify({
+          tutorialDone: true,
+          briefingSeen: ['static-site'],
+          bestStars: { 'photo-app': 3, migration: 3, 'flash-sale': 3, 'ipo-day': 3 },
+        }),
+      )
+    })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    // First Blood was inferred from the saved stars, with nothing persisted.
+    await expect(page.getByRole('button', { name: /🏆 1 \/ \d+/ })).toBeVisible()
+
+    // briefingSeen is seeded above, so this goes straight to the canvas.
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await palette(page, 'Amazon CloudFront').click()
+    await palette(page, 'Amazon S3').click()
+    await fitView(page)
+    await connect(page, '.react-flow__node[data-id="users"]', '.react-flow__node[data-id^="cloudfront"]')
+    await connect(page, '.react-flow__node[data-id^="cloudfront"]', '.react-flow__node[data-id^="s3"]')
+    await page.getByRole('button', { name: /Simulate/ }).click()
+
+    await expect(page.getByText('Well-Architected!')).toBeVisible({ timeout: 45_000 })
+    // The toast clears itself, so look for it while the run has only just ended.
+    await expect(page.getByText('Achievement unlocked').first()).toBeVisible()
+
+    // $15 of a $30 budget, two nodes against a two-node reference, and the
+    // fifth Foundations scenario — one run, four badges.
+    await page.getByRole('button', { name: /Refine design/ }).click()
+    await page.getByRole('button', { name: /change scenario/ }).click()
+    await page.getByRole('button', { name: /🏆 5 \/ \d+/ }).click()
+    await expect(page.getByRole('heading', { name: /Achievements/ })).toBeVisible()
+    // Only unlocked badges get the amber title, so this asserts they are lit
+    // rather than merely listed — locked ones are on screen too, by design.
+    for (const name of ['Foundations', 'Nailed It', 'Penny Pincher', 'Minimalist']) {
+      await expect(page.locator('.text-amber-200', { hasText: name })).toBeVisible()
+    }
+    // ...and something still locked stays visibly locked.
+    await expect(page.locator('.text-amber-200', { hasText: 'Well-Architected' })).toHaveCount(0)
+  })
+
   test('The Blackout: Route 53 fails over when a whole Region goes dark', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /The Blackout/ }).click()
