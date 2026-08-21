@@ -1072,3 +1072,148 @@ describe('Day 2: Game Day (game-day)', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 })
+
+describe('Day 2: The Shakedown (shakedown)', () => {
+  const sc = getScenario('shakedown')
+  const ATTACK = sc.attack!.rps
+
+  /** The intended chain, with the scrubber optionally spliced in at `at`. */
+  const chain = (ids: string[]) => {
+    const nodes = [N('users', 'users'), ...ids.map((s, i) => N(`n${i}`, s))]
+    const keys = ['users', ...ids.map((_, i) => `n${i}`)]
+    const edges = keys.slice(0, -1).map((k, i) => E(k, keys[i + 1]))
+    return { nodes, edges }
+  }
+
+  const attacked = (ids: string[], rps = sc.spikeRps, fleets: Record<string, number> = {}) => {
+    const { nodes, edges } = chain(ids)
+    return simulateTick(nodes, edges, rps, sc, fleets, {}, {}, { attackRps: ATTACK })
+  }
+
+  it('counts only real requests as served, however much junk is processed', () => {
+    // Lambda absorbs all 6,600 without dropping one. It still only "served" 600.
+    const s = attacked(['alb', 'lambda', 'dynamodb'])
+    expect(s.nodeLoads['n1'].processed).toBeCloseTo(sc.spikeRps + ATTACK, 0)
+    expect(s.total).toBe(sc.spikeRps)
+    expect(s.served).toBeCloseTo(sc.spikeRps, 0)
+    expect(s.served / s.total).toBeCloseTo(1, 3)
+  })
+
+  it('bills the attack at per-request prices — the economic denial of service', () => {
+    const s = attacked(['alb', 'lambda', 'dynamodb'])
+    // Lambda at $0.15/rps and DynamoDB at $0.05/rps, both serving 6,000 of junk.
+    expect(s.attackBill).toBeCloseTo(ATTACK * (0.15 + 0.05), 0)
+    expect(s.blocked).toBe(0)
+  })
+
+  it('charges nothing for an attack that never reaches a meter', () => {
+    const s = attacked(['waf', 'alb', 'lambda', 'dynamodb'])
+    expect(s.blocked).toBeCloseTo(ATTACK, 0)
+    expect(s.attackBill).toBe(0)
+    // The scrubber reports what it threw away; downstream sees clean traffic.
+    expect(s.nodeLoads['n0'].blocked).toBeCloseTo(ATTACK, 0)
+    expect(s.nodeLoads['n2'].inRps).toBeCloseTo(sc.spikeRps, 0)
+  })
+
+  it('still bills a scrubber placed behind something that meters', () => {
+    const s = attacked(['apigw', 'waf', 'fargate', 'dynamodb'], sc.spikeRps, { n2: 20 })
+    expect(s.blocked).toBeCloseTo(ATTACK, 0)
+    // Blocked, but only after API Gateway charged $0.10 for every one of them.
+    expect(s.attackBill).toBeCloseTo(ATTACK * 0.1, 0)
+  })
+
+  it('starves real users when the flood eats a capacity ceiling', () => {
+    // Fargate maxed out: 20 tasks × 100 rps against 6,600 arriving.
+    const s = attacked(['alb', 'fargate', 'dynamodb'], sc.spikeRps, { n1: 20 })
+    const share = 2000 / (sc.spikeRps + ATTACK)
+    expect(s.served / s.total).toBeCloseTo(share, 2)
+    expect(s.served / s.total).toBeLessThan(0.95)
+  })
+
+  it('cannot be fixed by buying capacity — that just processes more junk', () => {
+    const scaled = simulateTick(
+      chain(['alb', 'fargate', 'dynamodb']).nodes,
+      chain(['alb', 'fargate', 'dynamodb']).edges,
+      sc.spikeRps,
+      sc,
+      { n1: 20 },
+      {},
+      {},
+      { attackRps: ATTACK, computeCapacityFactor: 3 },
+    )
+    expect(scaled.served / scaled.total).toBeLessThan(0.95)
+    // ...and it made the bill worse, because more junk now reaches DynamoDB.
+    const plain = attacked(['alb', 'fargate', 'dynamodb'], sc.spikeRps, { n1: 20 })
+    expect(scaled.attackBill).toBeGreaterThan(plain.attackBill)
+  })
+
+  it('leaves every level without an attack completely unchanged', () => {
+    const { nodes, edges } = chain(['alb', 'fargate', 'dynamodb'])
+    const flash = getScenario('flash-sale')
+    const before = simulateTick(nodes, edges, 800, flash, { n1: 10 })
+    const after = simulateTick(nodes, edges, 800, flash, { n1: 10 }, {}, {}, { attackRps: 0 })
+    expect(after.served).toBe(before.served)
+    expect(after.dropped).toBe(before.dropped)
+    expect(after.attackBill).toBe(0)
+    expect(after.blocked).toBe(0)
+  })
+
+  it('routes the flood through the same splits real traffic takes', () => {
+    // Users wired to two independent front doors: each sees half of everything.
+    const nodes = [
+      N('users', 'users'),
+      N('waf', 'waf'),
+      N('alb', 'alb'),
+      N('c1', 'lambda'),
+      N('c2', 'lambda'),
+      N('db', 'dynamodb'),
+    ]
+    const edges = [E('users', 'waf'), E('users', 'alb'), E('waf', 'c1'), E('alb', 'c2'), E('c1', 'db'), E('c2', 'db')]
+    const s = simulateTick(nodes, edges, sc.spikeRps, sc, {}, {}, {}, { attackRps: ATTACK })
+    // Half the junk died at the WAF; the other half walked in and got billed.
+    expect(s.blocked).toBeCloseTo(ATTACK / 2, 0)
+    expect(s.attackBill).toBeCloseTo((ATTACK / 2) * (0.15 + 0.05), 0)
+  })
+
+  it('is answerable: the required scrubber exists and is edge-safe', () => {
+    for (const id of sc.requiredServices ?? []) expect(SERVICES[id]).toBeDefined()
+    expect(SERVICES.waf.scrubsAttack).toBe(true)
+    expect(SERVICES.waf.edgeSafe).toBe(true)
+    // A flat price is the whole argument for it — a scrubber that billed per
+    // request would be its own economic denial of service.
+    expect(SERVICES.waf.costPerRps).toBe(0)
+  })
+
+  it('offers no free way out: both incident defaults cost nothing', () => {
+    for (const d of sc.decisions ?? []) {
+      expect(d.options[d.defaultIndex].surcharge ?? 0).toBe(0)
+      expect(d.phase).toBe('spike')
+      expect(d.tick).toBeLessThan(26)
+    }
+    // ...and either payment on its own is enough to lose the budget star.
+    const paid = (sc.decisions ?? []).map((d) => d.options[1 - d.defaultIndex].surcharge ?? 0)
+    for (const p of paid) expect(p).toBeGreaterThan(0)
+  })
+})
+
+describe('The Shakedown: paying the ransom', () => {
+  const sc = getScenario('shakedown')
+  const ransom = sc.decisions!.find((d) => d.id === 'sd-ransom')!
+  const pay = ransom.options[1 - ransom.defaultIndex]
+
+  it('buys a pause, never an ending', () => {
+    expect(pay.surcharge).toBeGreaterThan(0)
+    expect(pay.attackFactor?.factor).toBe(0)
+    // A *finite* pause is the whole point of the option. An unbounded one would
+    // make paying the correct play, which is the opposite of the lesson.
+    expect(pay.attackFactor!.ticks).toBeGreaterThan(0)
+    const spikeTicks = 26
+    expect(ransom.tick + pay.attackFactor!.ticks).toBeLessThan(spikeTicks)
+  })
+
+  it('costs the budget star on its own', () => {
+    // The reference design lands at $90 of a $120 budget, so this one payment
+    // is enough to lose the third star no matter how good the architecture is.
+    expect(pay.surcharge! + 90).toBeGreaterThan(sc.budget)
+  })
+})

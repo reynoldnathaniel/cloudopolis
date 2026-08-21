@@ -146,9 +146,17 @@ function ServiceNodeInner({ id, data, selected }: NodeProps<ServiceNodeType>) {
           </div>
           <div className="mt-0.5 flex justify-between text-[9px] text-slate-500">
             <span>{Math.round(stats.inRps)} rps in</span>
-            <span className={overloaded ? 'font-bold text-red-400' : ''}>
-              {overloaded ? (isAsg ? 'SCALING UP…' : 'OVERLOAD') : isAsg ? `${utilPct}%` : def.autoScales ? 'scaling' : `${utilPct}%`}
-            </span>
+            {/* A scrubber's whole job is the number it throws away, so that is
+                what its tile reports instead of a utilisation percentage. */}
+            {(stats.blocked ?? 0) > 0 ? (
+              <span className="font-bold text-emerald-400">
+                🛡 {Math.round(stats.blocked ?? 0).toLocaleString()} blocked
+              </span>
+            ) : (
+              <span className={overloaded ? 'font-bold text-red-400' : ''}>
+                {overloaded ? (isAsg ? 'SCALING UP…' : 'OVERLOAD') : isAsg ? `${utilPct}%` : def.autoScales ? 'scaling' : `${utilPct}%`}
+              </span>
+            )}
           </div>
         </div>
       )}

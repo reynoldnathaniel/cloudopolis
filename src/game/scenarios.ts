@@ -88,6 +88,8 @@ export interface DecisionOption {
   computeFactor?: { factor: number; ticks: number }
   /** Multiply incoming traffic for a while */
   rpsFactor?: { factor: number; ticks: number }
+  /** Multiply the attack for a while — 0 stops it dead, until it comes back */
+  attackFactor?: { factor: number; ticks: number }
 }
 
 /**
@@ -147,6 +149,17 @@ export interface Scenario {
   bursts?: { onTicks: number; offTicks: number }
   /** Incidents that interrupt the run and ask the player to decide, live. */
   decisions?: Decision[]
+  /**
+   * A flood of malicious requests arrives during the spike phase, on top of the
+   * real traffic and indistinguishable from it. Flat, not ramped — botnets do
+   * not ease into it. Off everywhere else, so no existing level changes.
+   */
+  attack?: {
+    /** Junk requests per second */
+    rps: number
+    /** Shown on the HUD while it is happening */
+    label: string
+  }
   baselineRps: number
   spikeRps: number
   spikeLabel: string
@@ -538,6 +551,85 @@ export const SCENARIOS: Scenario[] = [
             label: 'Ride it out',
             outcome: 'Rode out the leak: capacity stayed degraded for the rest of the spike.',
             computeFactor: { factor: 0.6, ticks: 14 },
+          },
+        ],
+        defaultIndex: 0,
+        seconds: 15,
+      },
+    ],
+  },
+  {
+    id: 'shakedown',
+    track: 'day2',
+    order: 2,
+    difficulty: 3,
+    title: 'The Shakedown',
+    emoji: '👾',
+    hook: 'Six thousand fake requests a second, and an email asking for money.',
+    brief:
+      'The email arrived first: pay, or we take you down tonight. Nobody paid, and at 8pm a botnet started throwing six thousand requests a second at your API — perfectly ordinary-looking requests, from thousands of addresses, indistinguishable from your actual customers once they are through the door. There are two ways this ends badly. Your capacity fills up with junk and real users get nothing; or you scale to absorb all of it, serve the botnet flawlessly, and open next month’s invoice. Filter it before it costs you anything.',
+    need: 'app',
+    baselineRps: 400,
+    spikeRps: 600,
+    spikeLabel: '👾 The botnet opens up — 6,000 junk req/s!',
+    budget: 120,
+    hasProbe: true,
+    attack: { rps: 6000, label: '👾 UNDER ATTACK' },
+    banned: ['sqs', 'sns', 'kinesis'],
+    bannedReason:
+      'Buffering an attack is paying to store it. Every request has to be answered or refused the moment it lands.',
+    requiredServices: ['waf'],
+    goalHints: [
+      'Nothing behind your front door can tell a botnet from a customer. Whatever filtering you do has to happen before the request reaches anything you pay for.',
+      'Absorbing the flood is not surviving it. A service elastic enough to serve 6,600 rps will bill you for all 6,600 — per-request pricing charges the same for junk.',
+      'WAF is a flat $10 whether you are attacked or not, and it belongs first in the chain. Blocked after API Gateway is blocked after the meter has already run.',
+    ],
+    decisions: [
+      {
+        id: 'sd-scale',
+        phase: 'spike',
+        tick: 3,
+        emoji: '📊',
+        title: 'Everything is saturating',
+        prompt:
+          'Dashboards are solid red and the on-call channel wants to know why. You can take the fleet straight to its ceiling right now — triple the capacity, billed at emergency rates for the month.',
+        options: [
+          {
+            label: 'Hold — this is not a capacity problem',
+            outcome: 'Held the fleet. Whatever happened next, it was the architecture that did it.',
+          },
+          {
+            label: 'Scale to the ceiling · +$60/mo',
+            outcome: 'Tripled the fleet mid-attack: more capacity, most of it spent serving the botnet.',
+            surcharge: 60,
+            computeFactor: { factor: 3, ticks: 22 },
+          },
+        ],
+        defaultIndex: 0,
+        seconds: 15,
+      },
+      {
+        id: 'sd-ransom',
+        phase: 'spike',
+        tick: 12,
+        emoji: '💰',
+        title: 'They have emailed again',
+        prompt:
+          'Same address, shorter message: $100 and it stops tonight. Legal is asleep, the CFO is not, and someone on the call has already said out loud that it is cheaper than the outage.',
+        options: [
+          {
+            label: 'Do not pay',
+            outcome: 'Refused to pay. The attack ran its course and the invoice stayed yours to explain.',
+          },
+          {
+            label: 'Pay them · +$100/mo',
+            outcome:
+              'Paid $100. The flood stopped — and then it started again, because paying an attacker buys a pause, never an ending.',
+            surcharge: 100,
+            // Long enough to watch it happen and feel like it worked, short
+            // enough that it never rescues a design. Measured: it moves a
+            // saturating architecture from 30% to 59%, nowhere near the 95% bar.
+            attackFactor: { factor: 0, ticks: 8 },
           },
         ],
         defaultIndex: 0,

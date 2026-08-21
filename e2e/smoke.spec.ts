@@ -206,6 +206,52 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('🚨 Calls you made')).toBeVisible()
   })
 
+  test('The Shakedown: WAF scrubs the flood at the edge, and the bill stays clean', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await page.getByRole('button', { name: /The Shakedown/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+
+    // WAF first, in front of everything that has a ceiling or a meter.
+    await palette(page, 'AWS WAF').click()
+    await palette(page, 'Application Load Balancer').click()
+    await palette(page, 'Amazon ECS on AWS Fargate').click()
+    await palette(page, 'Amazon DynamoDB').click()
+    await fitView(page)
+    const n = (id: string) => `.react-flow__node[data-id="${id}"]`
+    await connect(page, n('users'), n('waf-1'))
+    await connect(page, n('waf-1'), n('alb-2'))
+    await connect(page, n('alb-2'), n('fargate-3'))
+    await connect(page, n('fargate-3'), n('dynamodb-4'))
+    expect(await edgeCount(page)).toBe(4)
+
+    await page.getByRole('button', { name: /Simulate/ }).click()
+
+    // The first incident freezes the run three ticks into the attack, which is
+    // the one moment the attack readouts are guaranteed to hold still — assert
+    // them here rather than racing a phase that lasts a few seconds.
+    await expect(page.getByText('Everything is saturating')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('👾 UNDER ATTACK')).toBeVisible()
+    await expect(page.getByText('junk/s')).toBeVisible()
+    // Six thousand arriving, six thousand dying at the edge.
+    const hud = await page.evaluate(() => document.body.innerText)
+    expect(hud).toContain('+6,000')
+    expect(hud).toContain('🛡 6,000')
+
+    // Neither offer is worth taking when the junk is already gone.
+    await page.getByRole('button', { name: /this is not a capacity problem/ }).click()
+    await expect(page.getByText('They have emailed again')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: /Do not pay/ }).click()
+
+    await expect(page.getByRole('button', { name: 'Running…' })).toHaveCount(0, { timeout: 60_000 })
+
+    await expect(page.getByText('Well-Architected!')).toBeVisible()
+    await expect(page.getByText('drop the flood before it costs you anything')).toBeVisible()
+    await expect(page.getByText('✓ 6,000 blocked')).toBeVisible()
+    await expect(page.getByText('✓ $90/mo')).toBeVisible()
+  })
+
   test('Trivia Night: plain Lambda cold-starts on every burst, PC does not', async ({ page }) => {
     // One failure already banked, so this run's failure unlocks the reveal.
     await page.addInitScript(() => {

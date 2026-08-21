@@ -120,7 +120,11 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
   // reference answer has to survive.
   let surcharge = 0
   let computeEffects: { factor: number; ticksLeft: number }[] = []
-  const product = () => computeEffects.reduce((a, e) => a * e.factor, 1)
+  let attackEffects: { factor: number; ticksLeft: number }[] = []
+  const product = (fx: { factor: number }[]) => fx.reduce((a, e) => a * e.factor, 1)
+  const expire = (fx: { factor: number; ticksLeft: number }[]) =>
+    fx.map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 })).filter((e) => e.ticksLeft > 0)
+  let attackBillPeak = 0
   let prevLoads: Record<string, { inRps: number }> = {}
   let prevRps = 0
   let cost = 0
@@ -151,7 +155,18 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
             ticksLeft: option.computeFactor.ticks,
           })
         }
+        if (option.attackFactor) {
+          attackEffects.push({
+            factor: option.attackFactor.factor,
+            ticksLeft: option.attackFactor.ticks,
+          })
+        }
       }
+
+      const attackNow =
+        scenario.attack && ph.name === 'spike'
+          ? Math.round(scenario.attack.rps * product(attackEffects))
+          : 0
 
       const outageNow = ph.name === 'outage'
 
@@ -178,14 +193,15 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
       }
 
       const stats = simulateTick(lite, edges, rps, scenario, fleets, backlogs, warm, {
-        computeCapacityFactor: product(),
+        computeCapacityFactor: product(computeEffects),
+        attackRps: attackNow,
       })
       backlogs = stats.queueBacklogs
       warm = stats.warmCapacity
       prevLoads = stats.nodeLoads
-      computeEffects = computeEffects
-        .map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 }))
-        .filter((e) => e.ticksLeft > 0)
+      attackBillPeak = Math.max(attackBillPeak, stats.attackBill)
+      computeEffects = expire(computeEffects)
+      attackEffects = expire(attackEffects)
 
       runServed += stats.served
       runDropped += stats.dropped
@@ -230,8 +246,9 @@ function simulateRun(scenario: Scenario, solution: Solution): RunResult {
       secure &&
       blueprintOk
   }
-  // Surcharges from decisions land on the same bill the design does.
-  const scoredCost = cost + surcharge
+  // Surcharges from decisions land on the same bill the design does, and so
+  // does every per-request charge the attack ran up.
+  const scoredCost = cost + surcharge + Math.round(attackBillPeak)
   const star3 = star2 && scoredCost <= scenario.budget
   const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 

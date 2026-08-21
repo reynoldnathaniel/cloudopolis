@@ -9,6 +9,7 @@ import s3 from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Stora
 import cloudfront from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Amazon-CloudFront_64.svg'
 import alb from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Elastic-Load-Balancing_64.svg'
 import route53 from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Networking-Content-Delivery/64/Arch_Amazon-Route-53_64.svg'
+import waf from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Security-Identity-Compliance/64/Arch_AWS-WAF_64.svg'
 import apigw from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_App-Integration/Arch_64/Arch_Amazon-API-Gateway_64.svg'
 import rds from 'aws-svg-icons/lib/Architecture-Service-Icons_07302021/Arch_Database/64/Arch_Amazon-RDS_64.svg'
 // No pack ships a dedicated read-replica icon; the RDS *instance* resource icon
@@ -37,6 +38,7 @@ export const ICONS: Record<string, string> = {
   cloudfront,
   alb,
   route53,
+  waf,
   apigw,
   rds,
   'rds-replica': rdsReplica,

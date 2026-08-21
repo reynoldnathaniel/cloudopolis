@@ -164,13 +164,32 @@ export function ResultsModal() {
                   pass={results.securityFindings === 0}
                 />
               )}
+              {/* Whether the attack ever reached a meter is the pillar this
+                  level actually turns on, so it gets stated outright rather
+                  than left to be inferred from the cost line. */}
+              {results.blockedPeak !== null && (
+                <Pillar
+                  label="🛡 Attack surface"
+                  target="drop the flood before it costs you anything"
+                  value={
+                    results.attackBill > 0
+                      ? `$${results.attackBill}/mo billed`
+                      : results.blockedPeak > 0
+                        ? `${results.blockedPeak.toLocaleString()} blocked`
+                        : 'nothing filtered'
+                  }
+                  pass={results.attackBill === 0 && results.blockedPeak > 0}
+                />
+              )}
               <Pillar
                 label="💰 Cost"
-                target={
-                  results.surcharge > 0
-                    ? `stay under $${results.budget}/mo · incl. $${results.surcharge} bought mid-incident`
-                    : `stay under $${results.budget}/mo`
-                }
+                target={[
+                  `stay under $${results.budget}/mo`,
+                  results.surcharge > 0 ? `incl. $${results.surcharge} bought mid-incident` : null,
+                  results.attackBill > 0 ? `incl. $${results.attackBill} of attack traffic` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
                 value={`$${results.costAtBaseline}/mo`}
                 pass={results.costAtBaseline <= results.budget}
               />

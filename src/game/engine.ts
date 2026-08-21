@@ -41,26 +41,43 @@ export interface NodeLoad {
   instances?: number
   /** Queues only: events waiting in the backlog after this tick */
   backlog?: number
+  /** Scrubbing services (WAF) only: attack rps dropped here this tick */
+  blocked?: number
 }
 
 /**
- * Live adjustments from a mid-run decision. Deliberately thin: the engine only
- * needs to know how much compute capacity is available this tick, and the store
- * owns everything else about how a decision plays out (surcharges, traffic
- * shaping, how long an effect lasts).
+ * Live per-tick inputs the store owns rather than the graph: a mid-run
+ * decision's effects, and how hard the design is currently being attacked.
+ * Deliberately thin — the engine is told the numbers, never why they changed.
  */
 export interface TickModifiers {
   /** Multiplies every compute tier's capacity — emergency capacity, or a leak */
   computeCapacityFactor?: number
+  /**
+   * Malicious requests per second arriving alongside `rps`, indistinguishable
+   * from it. They consume capacity and run up per-request charges exactly like
+   * real traffic; they just never count as anyone being served.
+   */
+  attackRps?: number
 }
 
 export interface TickStats {
   nodeLoads: Record<string, NodeLoad>
   edgeFlows: Record<string, number>
+  /** Real requests answered. Attack traffic that gets processed is never served. */
   served: number
+  /** Real requests lost. Attack traffic that gets dropped is not a loss. */
   dropped: number
-  /** rps plus any fan-out copies emitted this tick */
+  /** rps plus any fan-out copies emitted this tick — real traffic only */
   total: number
+  /** Attack rps a scrubbing layer (WAF) threw away before it cost anything */
+  blocked: number
+  /**
+   * Dollars per month of per-request charges run up by the attack this tick.
+   * A design that absorbs a flood without dropping a request still invoices
+   * you for every one of them — this is the number that makes that visible.
+   */
+  attackBill: number
   /** Updated queue backlogs — feed these into the next tick */
   queueBacklogs: Record<string, number>
   /** Updated warm capacity per cold-start service — feed these into the next tick */
@@ -115,6 +132,7 @@ export function simulateTick(
   modifiers: TickModifiers = {},
 ): TickStats {
   const computeFactor = modifiers.computeCapacityFactor ?? 1
+  const attackRps = modifiers.attackRps ?? 0
   const nodeById = new Map(nodes.map((n) => [n.id, n]))
   const out = new Map<string, LiteEdge[]>()
   const indeg = new Map<string, number>()
@@ -138,9 +156,13 @@ export function simulateTick(
   // Traffic that arrived from the app tier (compute or cache) — the only
   // traffic a database, model, or cache will accept.
   const appIn: Record<string, number> = {}
+  // How much of what arrived at each node is the attack. Junk is not tagged in
+  // any way your infrastructure can see; this is bookkeeping for the scoreboard.
+  const attackIn: Record<string, number> = {}
   for (const n of nodes) {
     inLoad[n.id] = 0
     appIn[n.id] = 0
+    attackIn[n.id] = 0
   }
 
   const nodeLoads: Record<string, NodeLoad> = {}
@@ -150,6 +172,7 @@ export function simulateTick(
   const issues = new Set<string>()
   let served = 0
   let dropped = 0
+  let blocked = 0
   let extraTotal = 0
 
   const users = nodes.find((n) => n.serviceId === 'users')
@@ -160,12 +183,29 @@ export function simulateTick(
       served: 0,
       dropped: rps,
       total: rps,
+      blocked: 0,
+      attackBill: 0,
       queueBacklogs: { ...queueBacklogs },
       warmCapacity: { ...warmCapacity },
       issues: ['users-disconnected'],
     }
   }
-  inLoad[users.id] = rps
+  // The flood arrives at the same front door as everyone else.
+  inLoad[users.id] = rps + attackRps
+  attackIn[users.id] = attackRps
+
+  // The share of what is arriving at the node being processed right now that is
+  // junk. Attack traffic is indistinguishable from real traffic once it is past
+  // the edge, so every capacity ceiling, cache hit ratio, and fan-out split
+  // applies to both in exactly the same proportion — and `served` and `dropped`
+  // stay counted in real requests, so success keeps meaning what your users saw.
+  let attackFrac = 0
+  const serve = (amount: number) => {
+    served += amount * (1 - attackFrac)
+  }
+  const drop = (amount: number) => {
+    dropped += amount * (1 - attackFrac)
+  }
 
   const isOffline = (id: string): boolean => {
     const n = nodeById.get(id)
@@ -198,9 +238,11 @@ export function simulateTick(
   const forward = (amount: number, targets: LiteEdge[], fromApp: boolean) => {
     if (targets.length === 0 || amount <= 0) return false
     const share = amount / targets.length
+    const junk = share * attackFrac
     for (const e of targets) {
       edgeFlows[e.id] = (edgeFlows[e.id] ?? 0) + share
       inLoad[e.target] += share
+      attackIn[e.target] += junk
       if (fromApp) appIn[e.target] += share
     }
     return true
@@ -214,13 +256,14 @@ export function simulateTick(
     const node = nodeById.get(id)!
     const def = SERVICES[node.serviceId]
     const L = inLoad[id]
+    attackFrac = L > 0 ? Math.min(1, attackIn[id] / L) : 0
     const outs = out.get(id) ?? []
     const healthyOuts = outs.filter((e) => !isOffline(e.target))
 
     // A dead or unplaced node serves nothing: everything sent to it is lost.
     if (isOffline(id)) {
       if (L > 1) {
-        dropped += L
+        drop(L)
         issues.add(node.dead ? 'hit-dead-node' : placementIssue)
       }
       nodeLoads[id] = { inRps: L, processed: 0, capacity: def.capacity, util: 0 }
@@ -236,7 +279,7 @@ export function simulateTick(
       case 'client': {
         // Users spray traffic across every connection — no health checks at DNS level.
         if (L > 0 && !forward(L, outs, false)) {
-          dropped += L
+          drop(L)
           issues.add('users-disconnected')
         }
         nodeLoads[id] = { inRps: L, processed: L, capacity: Infinity, util: 0 }
@@ -245,48 +288,64 @@ export function simulateTick(
       case 'cdn': {
         const p = Math.min(L, def.capacity)
         const over = L - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         if (outs.length === 0) {
           if (p > 0) {
-            dropped += p
+            drop(p)
             issues.add('cdn-no-origin')
           }
         } else if (healthyOuts.length === 0) {
           if (p > 0) {
-            dropped += p
+            drop(p)
             issues.add('all-targets-dead')
           }
         } else {
           const cache = scenario.need === 'static' ? CACHE_RATIO_STATIC : CACHE_RATIO_APP
-          served += p * cache
+          serve(p * cache)
           forward(p * (1 - cache), healthyOuts, false)
         }
         nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: L / def.capacity }
         break
       }
       case 'router': {
-        const p = Math.min(L, def.capacity)
-        const over = L - p
-        dropped += over
+        // A scrubbing layer (WAF) inspects what arrives and throws the attack
+        // away right here — before it can occupy a task slot or bill a single
+        // per-request charge to anything behind it. Everything downstream of
+        // this point sees clean traffic, which is the entire value proposition.
+        const junk = def.scrubsAttack === true ? attackIn[id] : 0
+        if (junk > 0) {
+          blocked += junk
+          attackFrac = 0
+        }
+        const arriving = L - junk
+        const p = Math.min(arriving, def.capacity)
+        const over = arriving - p
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         if (p > 0) {
           if (outs.length === 0) {
-            dropped += p
+            drop(p)
             issues.add('router-no-targets')
           } else if (!forward(p, healthyOuts, false)) {
-            dropped += p
+            drop(p)
             issues.add('all-targets-dead')
           }
         }
-        nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: L / def.capacity }
+        nodeLoads[id] = {
+          inRps: L,
+          processed: p,
+          capacity: def.capacity,
+          util: L / def.capacity,
+          blocked: def.scrubsAttack === true ? junk : undefined,
+        }
         break
       }
       case 'fanout': {
         // Pub/sub: every healthy subscriber gets its own full copy of each event.
         const p = Math.min(L, def.capacity)
         const over = L - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         const subs = healthyOuts.filter((e) => {
           const t = nodeById.get(e.target)
@@ -296,13 +355,14 @@ export function simulateTick(
         })
         if (p > 0) {
           if (subs.length === 0) {
-            dropped += p
+            drop(p)
             issues.add('fanout-no-subscribers')
           } else {
-            extraTotal += p * (subs.length - 1)
+            extraTotal += p * (1 - attackFrac) * (subs.length - 1)
             for (const e of subs) {
               edgeFlows[e.id] = (edgeFlows[e.id] ?? 0) + p
               inLoad[e.target] += p
+              attackIn[e.target] += p * attackFrac
             }
           }
         }
@@ -313,7 +373,7 @@ export function simulateTick(
         // Bursts become backlog, not loss. Consumers drain at their capacity.
         const accepted = Math.min(L, def.capacity)
         const throttled = L - accepted
-        dropped += throttled
+        drop(throttled)
         if (throttled > 1) issues.add(`overloaded:${def.name}`)
 
         const backlog = queueBacklogs[id] ?? 0
@@ -335,6 +395,11 @@ export function simulateTick(
               const share = (drained * caps[i]) / capSum
               edgeFlows[e.id] = (edgeFlows[e.id] ?? 0) + share
               inLoad[e.target] += share
+              // Approximate once a backlog has built up: the queue does not
+              // remember which of the messages it is holding were junk. Every
+              // scenario that turns the attack on bans buffering outright, so
+              // nothing shipped ever drains a mixed backlog.
+              attackIn[e.target] += share * attackFrac
             })
           }
         }
@@ -342,7 +407,7 @@ export function simulateTick(
         let remaining = available - drained
         const buffer = def.bufferSize ?? 0
         if (remaining > buffer) {
-          dropped += remaining - buffer
+          drop(remaining - buffer)
           issues.add('queue-overflow')
           remaining = buffer
         }
@@ -360,12 +425,12 @@ export function simulateTick(
       case 'origin-static': {
         const p = Math.min(L, def.capacity)
         const over = L - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         if (scenario.need === 'static') {
-          served += p
+          serve(p)
         } else if (p > 0) {
-          dropped += p
+          drop(p)
           issues.add('static-cant-dynamic')
         }
         nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: L / def.capacity }
@@ -376,7 +441,7 @@ export function simulateTick(
         const instances = def.scaling ? (fleetCounts[id] ?? def.scaling.min) : undefined
         let p = Math.min(L, cap)
         const over = L - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
 
         // Cold starts: anything above what this function has warm needs a new
@@ -390,7 +455,7 @@ export function simulateTick(
           const target = p
           const timedOut = Math.max(0, target - warm) * COLD_TIMEOUT_RATE
           if (timedOut > 1) {
-            dropped += timedOut
+            drop(timedOut)
             issues.add('cold-start')
             p -= timedOut
           }
@@ -410,10 +475,10 @@ export function simulateTick(
           const healthyApp = appTargets.filter((e) => !isOffline(e.target))
           if (p > 0) {
             if (appTargets.length === 0) {
-              dropped += p
+              drop(p)
               issues.add('compute-no-db')
             } else if (healthyApp.length === 0) {
-              dropped += p
+              drop(p)
               issues.add('db-unavailable')
             } else if (scenario.writeFraction === undefined) {
               forward(p, healthyApp, true)
@@ -431,7 +496,7 @@ export function simulateTick(
               const reads = p - writes
 
               if (writers.length === 0) {
-                dropped += writes
+                drop(writes)
                 issues.add('writes-need-primary')
               } else {
                 forward(writes, writers, true)
@@ -443,7 +508,7 @@ export function simulateTick(
           }
         } else {
           // In a static scenario a web server can serve files directly.
-          served += p
+          serve(p)
         }
         nodeLoads[id] = { inRps: L, processed: p, capacity: cap, util: L / cap, instances }
         break
@@ -452,15 +517,15 @@ export function simulateTick(
         const legit = Math.min(appIn[id], L)
         const direct = L - legit
         if (direct > 1) {
-          dropped += direct
+          drop(direct)
           issues.add('cache-direct')
         }
         const p = Math.min(legit, def.capacity)
         const over = legit - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         if (p > 0) {
-          served += p * CACHE_HIT_RATIO
+          serve(p * CACHE_HIT_RATIO)
           const misses = p * (1 - CACHE_HIT_RATIO)
           const dbTargets = outs.filter((e) => {
             const t = nodeById.get(e.target)
@@ -470,10 +535,10 @@ export function simulateTick(
           })
           const healthyDb = dbTargets.filter((e) => !isOffline(e.target))
           if (dbTargets.length === 0) {
-            dropped += misses
+            drop(misses)
             issues.add('cache-no-db')
           } else if (healthyDb.length === 0) {
-            dropped += misses
+            drop(misses)
             issues.add('db-unavailable')
           } else {
             forward(misses, healthyDb, true)
@@ -489,12 +554,12 @@ export function simulateTick(
         const legit = Math.min(appIn[id], L)
         const direct = L - legit
         if (direct > 1) {
-          dropped += direct
+          drop(direct)
           issues.add('db-direct-access')
         }
         const p = Math.min(legit, def.capacity)
         const over = legit - p
-        dropped += over
+        drop(over)
         if (over > 1) issues.add(`overloaded:${def.name}`)
         if (p > 0) {
           const modelTargets = outs.filter((e) => {
@@ -503,10 +568,10 @@ export function simulateTick(
           })
           const healthyModels = modelTargets.filter((e) => !isOffline(e.target))
           if (modelTargets.length === 0) {
-            dropped += p
+            drop(p)
             issues.add('retriever-no-model')
           } else if (healthyModels.length === 0) {
-            dropped += p
+            drop(p)
             issues.add('db-unavailable')
           } else {
             // Everything retrieved goes on to be generated — no hit ratio here.
@@ -524,7 +589,7 @@ export function simulateTick(
       case 'db': {
         if (def.readsOnly === true && !hasRdsPrimary) {
           if (L > 1) {
-            dropped += L
+            drop(L)
             issues.add('replica-no-primary')
           }
           nodeLoads[id] = { inRps: L, processed: 0, capacity: def.capacity, util: 0 }
@@ -533,19 +598,17 @@ export function simulateTick(
         const legit = Math.min(appIn[id], L)
         const direct = L - legit
         if (direct > 1) {
-          dropped += direct
+          drop(direct)
           issues.add('db-direct-access')
         }
         const p = Math.min(legit, def.capacity)
         const over = legit - p
+        drop(over)
         if (over > 1) {
-          dropped += over
           issues.add(`overloaded:${def.name}`)
           if (node.serviceId !== 'bedrock' && node.serviceId !== 'sagemaker') issues.add('db-overloaded')
-        } else {
-          dropped += over
         }
-        served += p
+        serve(p)
         nodeLoads[id] = { inRps: L, processed: p, capacity: def.capacity, util: legit / def.capacity }
         break
       }
@@ -567,12 +630,32 @@ export function simulateTick(
     }
   }
 
+  // What the flood ran up on your bill. Per-request pricing does not care
+  // whether the request was real, so a design that absorbs an attack without
+  // dropping anything is not winning — it is being charged full price to serve
+  // a botnet. This is the whole of "economic denial of service" in four lines.
+  let attackBill = 0
+  if (attackRps > 0) {
+    for (const n of nodes) {
+      const def = SERVICES[n.serviceId]
+      if (def.costPerRps <= 0) continue
+      const arrived = inLoad[n.id]
+      if (arrived <= 0) continue
+      // A scrubber's `processed` count is already junk-free — it never passed
+      // any of it on, so none of it is on the invoice.
+      const frac = def.scrubsAttack === true ? 0 : Math.min(1, attackIn[n.id] / arrived)
+      attackBill += def.costPerRps * (nodeLoads[n.id]?.processed ?? 0) * frac
+    }
+  }
+
   return {
     nodeLoads,
     edgeFlows,
     served,
     dropped,
     total: rps + extraTotal,
+    blocked,
+    attackBill,
     queueBacklogs: newBacklogs,
     warmCapacity: newWarm,
     issues: [...issues],
@@ -692,6 +775,26 @@ export const ISSUE_TIPS: Record<string, string> = {
   'queue-overflow': 'The queue backlog overflowed its buffer and events were lost. Add consumer capacity so it drains faster.',
 }
 
+/**
+ * A design under attack fails in ways that look ordinary and are not. Saturating
+ * because the flood ate your capacity is not a sizing problem, and a bill that
+ * tripled is not a pricing problem — both are the same missing scrubbing layer.
+ */
+const ATTACK_TIPS: Record<string, string> = {
+  'db-overloaded':
+    'Your database saturated because it was answering the attack too. Nothing behind the front door can tell junk from a customer — the filtering has to happen before the request gets that far.',
+}
+
+/** Advice keyed off how the attack got through, assembled at scoring time. */
+export const ATTACK_ADVICE = {
+  noWaf:
+    'The flood walked in through your front door and consumed the capacity your customers needed. AWS WAF inspects requests at the edge and drops the junk before it reaches anything you pay for or depend on.',
+  absorbed:
+    'Nothing broke — you simply paid for the attack. Per-request pricing bills a botnet exactly like a customer, so a service elastic enough to absorb a flood will absorb the invoice too. This is economic denial of service, and scaling is not the answer to it.',
+  wafTooDeep:
+    'Your scrubbing layer is behind a service that bills per request, so the attack was already on the invoice by the time it was blocked. WAF belongs in front of everything that costs money — the first thing the traffic touches, not the second.',
+} as const
+
 const OVERLOAD_TIPS: Record<string, string> = {
   'Auto Scaling':
     'Auto Scaling briefly saturated while new instances booted — scaling is not instant. A higher minimum size absorbs sharper spikes.',
@@ -734,12 +837,13 @@ const SPLIT_TIPS: Record<string, string> = {
 
 export function tipsForIssues(
   issues: string[],
-  opts?: { multiRegion?: boolean; writeSplit?: boolean },
+  opts?: { multiRegion?: boolean; writeSplit?: boolean; underAttack?: boolean },
 ): string[] {
   const base = {
     ...ISSUE_TIPS,
     ...(opts?.multiRegion === true ? REGION_TIPS : {}),
     ...(opts?.writeSplit === true ? SPLIT_TIPS : {}),
+    ...(opts?.underAttack === true ? ATTACK_TIPS : {}),
   }
   const tips: string[] = []
   for (const issue of issues) {

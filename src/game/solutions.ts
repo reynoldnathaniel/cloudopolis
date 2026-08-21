@@ -242,6 +242,16 @@ export const SOLUTIONS: Record<string, Solution> = {
     ],
   },
 
+  shakedown: {
+    nodes: chain('waf', 'alb', 'fargate', 'dynamodb'),
+    edges: link('users', 'waf', 'alb', 'fargate', 'dynamodb'),
+    notes: [
+      'WAF comes before anything with a capacity ceiling or a per-request price. Six thousand junk requests a second die at the edge, so Fargate never runs them and DynamoDB never invoices for them — and $10 flat is the same $10 whether you are attacked or not.',
+      'Order is the whole lesson. Behind API Gateway this identical design scores two stars and costs $715, because the attack was already metered before it was blocked. Filtering after the meter is not filtering.',
+      'Both incidents answer themselves once the junk is gone. There is no capacity problem to spend $60 fixing, and nothing to buy off for $100 — either payment on its own would have cost you the budget star.',
+    ],
+  },
+
   blackout: {
     nodes: [
       { key: 'route53', serviceId: 'route53', x: 165, y: 245 },

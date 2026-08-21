@@ -82,6 +82,12 @@ export interface ServiceDef {
   coldStart?: boolean
   /** Pre-warmed capacity in rps that never goes cold (provisioned concurrency). */
   warmFloor?: number
+  /**
+   * Inspects traffic and drops the attack before passing anything on. Only
+   * meaningful in scenarios that declare an `attack`; everywhere else this is
+   * an ordinary pass-through router.
+   */
+  scrubsAttack?: boolean
   blurb: string
 }
 
@@ -128,6 +134,24 @@ export const SERVICES: Record<string, ServiceDef> = {
     edgeSafe: true,
     blurb:
       'Global DNS with health checks. It watches every endpoint behind it and stops answering with the ones that are down — so a whole Region can fail and users still land somewhere alive.',
+  },
+  waf: {
+    id: 'waf',
+    name: 'WAF',
+    fullName: 'AWS WAF (web application firewall)',
+    abbr: 'WAF',
+    category: 'network',
+    role: 'router',
+    monthlyCost: 10,
+    costPerRps: 0,
+    capacity: 100000,
+    autoScales: true,
+    zonal: false,
+    global: true,
+    edgeSafe: true,
+    scrubsAttack: true,
+    blurb:
+      'Inspects every request at the edge and drops the ones that are not customers — rate limits, bot rules, reputation lists. Flat price, no per-request charge, so it costs the same whether you are being attacked or not. Put it in FRONT of anything that bills per request: junk blocked after the meter has run is junk you already paid for.',
   },
   cloudfront: {
     id: 'cloudfront',
@@ -430,7 +454,10 @@ export interface PaletteGroup {
 
 /** Palette, grouped for display (everything except the Users node) */
 export const PALETTE_GROUPS: PaletteGroup[] = [
-  { label: 'Edge & Network', items: [SERVICES.route53, SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw] },
+  {
+    label: 'Edge & Network',
+    items: [SERVICES.route53, SERVICES.waf, SERVICES.cloudfront, SERVICES.alb, SERVICES.apigw],
+  },
   {
     label: 'Compute',
     items: [SERVICES.ec2, SERVICES.asg, SERVICES.fargate, SERVICES.lambda, SERVICES['lambda-pc']],

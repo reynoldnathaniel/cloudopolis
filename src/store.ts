@@ -17,6 +17,7 @@ import {
   blueprintMissing,
   nextFleetCount,
   fleetMin,
+  ATTACK_ADVICE,
   type NodeLoad,
   type LiteNode,
   type LiteEdge,
@@ -66,10 +67,14 @@ export interface RunResults {
   securityFindings: number | null
   /** required services missing or idle; null = scenario has no requirement */
   blueprintMissing: string[] | null
-  /** Baseline cost plus any surcharges the run's decisions incurred */
+  /** Baseline cost, plus decision surcharges, plus whatever the attack ran up */
   costAtBaseline: number
   /** Of that cost, how much came from decisions rather than the design */
   surcharge: number
+  /** Of that cost, how much was per-request charges for serving the attack */
+  attackBill: number
+  /** Attack rps a scrubbing layer threw away at its peak; null with no attack */
+  blockedPeak: number | null
   budget: number
   decisions: DecisionRecord[]
   tips: string[]
@@ -106,6 +111,10 @@ interface GameStore {
   edgeFlows: Record<string, number>
   runPhase: RunPhaseName
   currentRps: number
+  /** Junk requests per second arriving right now (0 when nothing is attacking) */
+  attackRps: number
+  /** Junk requests per second a WAF is currently scrubbing at the edge */
+  blockedRps: number
   monthlyCost: number
   liveSuccess: number
   results: RunResults | null
@@ -359,6 +368,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   edgeFlows: {},
   runPhase: 'baseline',
   currentRps: 0,
+  attackRps: 0,
+  blockedRps: 0,
   monthlyCost: 0,
   liveSuccess: 1,
   results: null,
@@ -570,6 +581,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       edgeFlows: {},
       results: null,
       currentRps: 0,
+      attackRps: 0,
+      blockedRps: 0,
       monthlyCost: 0,
       liveSuccess: 1,
       struckAz: null,
@@ -739,6 +752,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       nodeStats: {},
       edgeFlows: {},
       currentRps: 0,
+      attackRps: 0,
+      blockedRps: 0,
       monthlyCost: 0,
       liveSuccess: 1,
       deadNodeIds: [],
@@ -901,6 +916,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let runServed = 0
     let runTotal = 0
     let runDropped = 0
+    // The attack is flat, so its worst tick is its steady state — taking the max
+    // reads the settled number without being fooled by the ramp on either side.
+    let attackBillPeak = 0
+    let blockedPeak = 0
     // One sample per tick; published to the store once, when the run ends.
     const history: TickPoint[] = []
     let blueprintMiss: string[] | null = scenario.requiredServices ? scenario.requiredServices.slice() : null
@@ -916,6 +935,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     // rather than being replaced by it.
     let computeEffects: { factor: number; ticksLeft: number }[] = []
     let rpsEffects: { factor: number; ticksLeft: number }[] = []
+    let attackEffects: { factor: number; ticksLeft: number }[] = []
     const product = (fx: { factor: number }[]) => fx.reduce((a, e) => a * e.factor, 1)
     const expire = (fx: { factor: number; ticksLeft: number }[]) =>
       fx.map((e) => ({ ...e, ticksLeft: e.ticksLeft - 1 })).filter((e) => e.ticksLeft > 0)
@@ -931,6 +951,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       }
       if (option.rpsFactor) {
         rpsEffects.push({ factor: option.rpsFactor.factor, ticksLeft: option.rpsFactor.ticks })
+      }
+      if (option.attackFactor) {
+        attackEffects.push({ factor: option.attackFactor.factor, ticksLeft: option.attackFactor.ticks })
       }
       decisionLog.push({
         emoji: decision.emoji,
@@ -988,6 +1011,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       }
       if (rpsEffects.length > 0) rps = Math.round(rps * product(rpsEffects))
 
+      // The flood lands the instant the spike phase begins and does not ramp:
+      // a botnet has no warm-up, and the whole shape of the level is how much
+      // arrives before anyone has decided anything.
+      const attackNow =
+        scenario.attack && ph.name === 'spike'
+          ? Math.round(scenario.attack.rps * product(attackEffects))
+          : 0
+
       const outageNow = ph.name === 'outage'
       const lite: LiteNode[] = []
       const deadIds: string[] = []
@@ -1034,10 +1065,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         fleetCounts,
         backlogState,
         warmState,
-        { computeCapacityFactor: product(computeEffects) },
+        { computeCapacityFactor: product(computeEffects), attackRps: attackNow },
       )
       backlogState = stats.queueBacklogs
       warmState = stats.warmCapacity
+      attackBillPeak = Math.max(attackBillPeak, stats.attackBill)
+      blockedPeak = Math.max(blockedPeak, stats.blocked)
+      // Deliberately NOT attack-adjusted: per-rps pricing bills the flood, so a
+      // design that absorbs it watches its own cost readout climb into four
+      // figures live, on the HUD and on the run timeline. That is the lesson.
       const cost = estimateMonthlyCost(lite, stats.nodeLoads)
       history.push({
         rps,
@@ -1080,6 +1116,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         nodeStats: stats.nodeLoads,
         edgeFlows: stats.edgeFlows,
         currentRps: rps,
+        attackRps: attackNow,
+        blockedRps: stats.blocked,
         monthlyCost: cost,
         runPhase: ph.name,
         liveSuccess,
@@ -1089,6 +1127,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       // Decision effects are temporary — count them down once per tick.
       computeEffects = expire(computeEffects)
       rpsEffects = expire(rpsEffects)
+      attackEffects = expire(attackEffects)
 
       tickInPhase += 1
       ticksDone += 1
@@ -1138,25 +1177,42 @@ export const useGameStore = create<GameStore>()((set, get) => ({
               blueprintOk
           }
           // Emergency capacity is billed to the same budget the design is —
-          // that is the entire point of offering it.
-          const scoredCost = costAtBaseline + surchargeTotal
+          // that is the entire point of offering it. So is the attack: nothing
+          // about per-request pricing cares that the requests were fake.
+          const attackBill = Math.round(attackBillPeak)
+          const scoredCost = costAtBaseline + surchargeTotal + attackBill
           const star3 = star2 && scoredCost <= scenario.budget
           const stars = (star1 ? 1 : 0) + (star2 ? 1 : 0) + (star3 ? 1 : 0)
 
           const tips = tipsForIssues([...allIssues], {
             multiRegion: scenario.multiRegion,
             writeSplit: scenario.writeFraction !== undefined,
+            underAttack: scenario.attack !== undefined,
           })
           if (findings) tips.push(...findings.map((f) => f.tip))
           if (blueprintMiss && blueprintMiss.length > 0) {
             const names = blueprintMiss.map((id) => SERVICES[id]?.name ?? id).join(', ')
             tips.push(`Blueprint: this scenario requires ${names} in the serving path.`)
           }
+          // How the attack got at you decides which lesson lands. Saturating and
+          // being over-billed are the same missing layer seen from two sides, so
+          // a design can honestly earn both notes at once.
+          if (scenario.attack) {
+            const hasScrubber = get().nodes.some(
+              (n) => n.type === 'service' && SERVICES[serviceIdOf(n)]?.scrubsAttack === true,
+            )
+            if (!hasScrubber && spikeSuccess < 0.95) tips.push(ATTACK_ADVICE.noWaf)
+            if (attackBill > 0) {
+              tips.push(hasScrubber ? ATTACK_ADVICE.wafTooDeep : ATTACK_ADVICE.absorbed)
+            }
+          }
           if (star2 && scoredCost > scenario.budget) {
             tips.push(
-              surchargeTotal > 0
-                ? `The architecture held, but $${surchargeTotal}/mo of that bill was bought mid-incident. A design that scales on its own would not have needed the offer.`
-                : `Solid architecture, but $${scoredCost}/mo blows the $${scenario.budget} budget. Serverless services cost near-zero at low traffic.`,
+              attackBill > 0
+                ? `The design held, and it still cost you $${scoredCost}/mo against a $${scenario.budget} budget — $${attackBill} of that was per-request charges for serving the attack. Surviving an attack you paid full price for is not surviving it.`
+                : surchargeTotal > 0
+                  ? `The architecture held, but $${surchargeTotal}/mo of that bill was bought mid-incident. A design that scales on its own would not have needed the offer.`
+                  : `Solid architecture, but $${scoredCost}/mo blows the $${scenario.budget} budget. Serverless services cost near-zero at low traffic.`,
             )
           }
 
@@ -1187,6 +1243,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
               blueprintMissing: blueprintMiss,
               costAtBaseline: scoredCost,
               surcharge: surchargeTotal,
+              attackBill,
+              blockedPeak: scenario.attack ? Math.round(blockedPeak) : null,
               decisions: decisionLog,
               budget: scenario.budget,
               tips,
@@ -1259,6 +1317,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         edgeFlows: {},
         nodeStats: {},
         currentRps: 0,
+        attackRps: 0,
+        blockedRps: 0,
         deadNodeIds: [],
         struckAz: null,
         struckRegion: null,
@@ -1274,6 +1334,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       edgeFlows: {},
       nodeStats: {},
       currentRps: 0,
+      attackRps: 0,
+      blockedRps: 0,
       results: null,
       deadNodeIds: [],
       struckAz: null,

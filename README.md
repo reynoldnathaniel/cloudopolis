@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 8 tracks, 14 scenarios
+### 8 tracks, 15 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -70,7 +70,7 @@ style you want to learn.
 | 📨 **Event-Driven** | Order Storm · Trivia Night | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue |
 | 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
 | 🌍 **Going Global** | The Blackout | An entire Region dies. Route 53 health checks fail traffic over to a complete second stack — and because the survivor absorbs *all* the load, only elastic services make two full regions affordable |
-| 🚨 **Day 2** | Game Day | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live — and every offer is answerable with money, which is the point: emergency capacity is billed to the same budget you are scored against |
+| 🚨 **Day 2** | Game Day · The Shakedown | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live — and every offer is answerable with money, which is the point: emergency capacity is billed to the same budget you are scored against. Then a botnet arrives, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
 
 ### Simulation mechanics
@@ -111,6 +111,16 @@ style you want to learn.
   options are written so the tempting one costs money and the free one only works if the design was
   already right — a decision punishes the architecture that needed it rather than handing out a
   power-up.
+- **Attack traffic** — a scenario can declare an `attack`, a flat flood of junk requests arriving
+  alongside the real ones during the spike. It is indistinguishable from real traffic once it is
+  past the edge, so every capacity ceiling, cache hit ratio, and fan-out split applies to both in
+  proportion — but `served` and `total` stay counted in *real* requests, so success keeps meaning
+  what your users experienced. It bites twice: junk occupies capacity that customers needed, and
+  junk that gets *processed* is billed at full per-request price. That second one is the whole of
+  economic denial of service, and it means absorbing a flood is not surviving it. **AWS WAF** is
+  the answer — a `scrubsAttack` service that drops the flood at the edge for a flat $10 — and
+  *where* you put it decides whether it works, because a scrubber behind API Gateway blocks the
+  attack only after the meter has already run.
 - **Retrieve-then-generate chains** — a vector store (OpenSearch) is a *mid-chain* stage: it
   grounds a request and forwards all of it onward, answering nothing itself. A request counts
   as served only once it completes the whole chain, so RAG is visible on the canvas as
@@ -207,7 +217,8 @@ Two layers, deliberately split:
   actually clicks: menu → tutorial → build a design by dragging edges between node handles →
   run the full ~15 s simulation → three stars → expand the timeline → author a scenario →
   the sandbox's endless run → a Region going dark behind Route 53 → failing a level twice and
-  taking the reference answer. It runs against a **production build** on `vite preview`, so it
+  taking the reference answer, and a botnet being scrubbed at the edge. It runs against a
+  **production build** on `vite preview`, so it
   tests exactly what deploys. ~3 minutes.
 
 First time only, fetch the browser binary:
@@ -296,7 +307,6 @@ replaying the level by hand.
 
 ## Roadmap
 
-- WAF + DDoS event, extending the security probe into a scenario of its own
 - EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 

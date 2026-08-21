@@ -14,6 +14,8 @@ export function HUD() {
   const phase = useGameStore((s) => s.phase)
   const runPhase = useGameStore((s) => s.runPhase)
   const rps = useGameStore((s) => s.currentRps)
+  const attackRps = useGameStore((s) => s.attackRps)
+  const blockedRps = useGameStore((s) => s.blockedRps)
   const success = useGameStore((s) => s.liveSuccess)
   const cost = useGameStore((s) => s.monthlyCost)
   const scenario = useGameStore((s) => s.scenario())
@@ -29,8 +31,15 @@ export function HUD() {
   const style = PHASE_STYLE[runPhase]
   // The outage chip is the one phase label that depends on which level of the
   // hierarchy just failed.
+  // ...and an attack outranks the spike it arrives under: "SPIKE" is not what
+  // the player needs to be reading while 6,000 junk requests a second land.
   const phaseLabel =
-    runPhase === 'outage' && multiRegion ? 'REGION OUTAGE' : style.label
+    runPhase === 'outage' && multiRegion
+      ? 'REGION OUTAGE'
+      : attackRps > 0 && scenario.attack
+        ? scenario.attack.label
+        : style.label
+  const attackStyle = 'border-rose-500/60 bg-rose-500/20 text-rose-300 animate-pulse'
   const successPct = Math.round(success * 100)
   const successColor = successPct >= 98 ? 'text-emerald-400' : successPct >= 90 ? 'text-amber-400' : 'text-red-400'
   const overBudget = cost > scenario.budget
@@ -42,17 +51,29 @@ export function HUD() {
           initial={{ y: -70, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -70, opacity: 0 }}
-          className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2"
+          // Above the incident overlay (z-60) on purpose. An incident asks you
+          // a question about the run — "is this a capacity problem?" — and the
+          // readouts are how you answer it. Blurring them out behind the card
+          // makes the decision a guess. Nothing else overlays during a run, and
+          // the expanded timeline (z-70) belongs to the results screen.
+          className="pointer-events-none absolute left-1/2 top-4 z-[65] -translate-x-1/2"
         >
           <div className="flex items-center gap-5 rounded-2xl border border-slate-700 bg-slate-900/90 px-5 py-2.5 shadow-2xl backdrop-blur">
             <span
               className={`rounded-md border px-2 py-0.5 text-[10px] font-bold tracking-widest ${
-                paused ? 'border-slate-500 bg-slate-700/40 text-slate-300' : style.cls
+                paused
+                  ? 'border-slate-500 bg-slate-700/40 text-slate-300'
+                  : attackRps > 0
+                    ? attackStyle
+                    : style.cls
               }`}
             >
               {paused ? '⏸ PAUSED' : phaseLabel}
             </span>
-            {runPhase === 'spike' && (
+            {/* Under attack the chip already says so and the junk counter says
+                how much — a second red sentence just crowds the readouts off
+                the row, and the readouts are what the incident is asking about. */}
+            {runPhase === 'spike' && attackRps === 0 && (
               <span className="text-[11px] font-semibold text-red-300">{scenario.spikeLabel}</span>
             )}
             {runPhase === 'outage' && (
@@ -67,8 +88,28 @@ export function HUD() {
             )}
             <div className="text-center">
               <div className="text-sm font-bold tabular-nums text-slate-100">{rps.toLocaleString()}</div>
-              <div className="text-[8px] uppercase tracking-wider text-slate-500">req/s</div>
+              <div className="text-[8px] uppercase tracking-wider text-slate-500">
+                {attackRps > 0 ? 'real req/s' : 'req/s'}
+              </div>
             </div>
+            {/* The two numbers that decide this level: how much junk arrived,
+                and how much of it died before it cost anything. */}
+            {attackRps > 0 && (
+              <div className="text-center">
+                <div className="text-sm font-bold tabular-nums text-rose-400">
+                  +{attackRps.toLocaleString()}
+                </div>
+                <div className="text-[8px] uppercase tracking-wider text-slate-500">junk/s</div>
+              </div>
+            )}
+            {blockedRps > 0 && (
+              <div className="text-center">
+                <div className="text-sm font-bold tabular-nums text-emerald-400">
+                  🛡 {Math.round(blockedRps).toLocaleString()}
+                </div>
+                <div className="text-[8px] uppercase tracking-wider text-slate-500">blocked</div>
+              </div>
+            )}
             <div className="text-center">
               <div className={`text-sm font-bold tabular-nums ${successColor}`}>{successPct}%</div>
               <div className="text-[8px] uppercase tracking-wider text-slate-500">served</div>
