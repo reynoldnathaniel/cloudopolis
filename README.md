@@ -56,7 +56,7 @@ build it, fail the spike, get flagged by the security probe, fix both with a CDN
 
 ## What's in it
 
-### 8 tracks, 15 scenarios
+### 5 tracks, 15 scenarios
 
 Tracks are independent **categories**, not a difficulty ladder — pick whichever architecture
 style you want to learn.
@@ -64,13 +64,10 @@ style you want to learn.
 | Track | Scenarios | The lesson |
 | --- | --- | --- |
 | ☁️ **Foundations** | Launch Day · PhotoShare · The Migration · FlashSale · IPO Day | CDN caching, load balancing, managed data stores, Multi-AZ redundancy, auto scaling |
-| 🐳 **Containers** | The Replatform | Fargate as the middle path — tasks scale twice as fast as VMs and bill in $8 slices, and at *sustained* load that beats pay-per-request outright |
+| ⚖️ **Scaling Up** | The Replatform · The Feed | You have outgrown the easy answer. Containers as the middle path — tasks scale twice as fast as VMs, bill in $8 slices, and beat pay-per-request outright at *sustained* load. Then a read/write split: 10% of traffic writes and must reach the one primary, 90% reads and fans out over fixed-size replicas you size for the peak and pay for at the trough |
+| 📨 **Event-Driven** | Order Storm · Trivia Night · Click Stream | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue. Then a firehose you must ingest without paying by the message — Kinesis's flat price against API Gateway's per-request bill |
 | 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
-| 🗄️ **Data** | The Feed | A read/write split: 10% of traffic writes and must reach the one primary, 90% reads and can fan out over read replicas — which are fixed-size, so you size them for the peak and pay for them at the trough |
-| 📨 **Event-Driven** | Order Storm · Trivia Night | A 12,000 rps burst a synchronous design *must* drop; API GW → SNS → SQS → Lambda buffers it and loses nothing. Then the mirror image: a burst you are *not allowed* to buffer, where the answer is a pre-warmed function instead of a queue |
-| 🌊 **Streaming** | Click Stream | Kinesis as the cheap durable ingest edge vs API Gateway's per-request bill, with Lambda consumers scoring on SageMaker |
-| 🌍 **Going Global** | The Blackout | An entire Region dies. Route 53 health checks fail traffic over to a complete second stack — and because the survivor absorbs *all* the load, only elastic services make two full regions affordable |
-| 🚨 **Day 2** | Game Day · The Shakedown | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live — and every offer is answerable with money, which is the point: emergency capacity is billed to the same budget you are scored against. Then a botnet arrives, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet |
+| 🚨 **Day 2** | Game Day · The Shakedown · The Blackout | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live, and every offer is answerable with money — which is the point, because emergency capacity is billed to the same budget you are scored against. Then a botnet, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet. Then the last exam: an entire Region goes dark and the app stays up |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
 
 ### Simulation mechanics
@@ -307,7 +304,7 @@ replaying the level by hand.
 
 ## Roadmap
 
-- EventBridge and Firehose → S3, deepening the event-driven and streaming tracks
+- EventBridge and Firehose → S3, deepening the Event-Driven track
 - Korean localization · achievements · sound effects · undo/redo · route-level code splitting
 
 ---

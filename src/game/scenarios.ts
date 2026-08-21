@@ -1,11 +1,8 @@
 export type TrackId =
   | 'foundations'
-  | 'containers'
-  | 'genai'
-  | 'data'
+  | 'scaling'
   | 'event-driven'
-  | 'streaming'
-  | 'global'
+  | 'genai'
   | 'day2'
   | 'custom'
 
@@ -24,47 +21,31 @@ export const TRACKS: Track[] = [
     description: 'The core loop: traffic, budgets, spikes, and zone failures. Start here.',
   },
   {
-    id: 'containers',
-    name: 'Containers',
-    emoji: '🐳',
-    description: 'The middle path: fleets that scale in seconds and bill by the task.',
-  },
-  {
-    id: 'genai',
-    name: 'GenAI',
-    emoji: '🤖',
-    description: 'LLM apps on Bedrock: quotas, token costs, and semantic caching.',
-  },
-  {
-    id: 'data',
-    name: 'Data',
-    emoji: '🗄️',
-    description: 'Relational data at scale: read/write splits, replicas, and the one primary every write must reach.',
+    id: 'scaling',
+    name: 'Scaling Up',
+    emoji: '⚖️',
+    description:
+      'You have outgrown the easy answer. Size a compute fleet and a data tier for real load — without the bill outgrowing you too.',
   },
   {
     id: 'event-driven',
     name: 'Event-Driven',
     emoji: '📨',
     description:
-      'Queues and pub/sub: lose no event when bursts dwarf your compute — and what to do when you are not allowed to buffer at all.',
+      'Stop thinking in requests. Buffer bursts that dwarf your compute, survive one you are not allowed to buffer, and ingest a firehose without paying by the message.',
   },
   {
-    id: 'streaming',
-    name: 'Streaming',
-    emoji: '🌊',
-    description: 'High-volume ingest and real-time AI scoring on the stream.',
-  },
-  {
-    id: 'global',
-    name: 'Going Global',
-    emoji: '🌍',
-    description: 'The last exam: an entire Region goes dark and the app stays up.',
+    id: 'genai',
+    name: 'GenAI',
+    emoji: '🤖',
+    description: 'LLM apps on Bedrock: quotas, token costs, semantic caching, and retrieval.',
   },
   {
     id: 'day2',
     name: 'Day 2',
     emoji: '🚨',
-    description: 'You are on call. The design is already shipped — now something is happening to it.',
+    description:
+      'You are on call. The design is already shipped — now a Region goes dark, the pager goes off, and someone starts attacking you.',
   },
   {
     id: 'custom',
@@ -186,7 +167,7 @@ export interface Scenario {
 }
 
 export const SCENARIOS: Scenario[] = [
-  // ---------------------------------------------------------- Foundations
+  // ----------------------------------------------------------- Foundations
   {
     id: 'static-site',
     track: 'foundations',
@@ -308,10 +289,10 @@ export const SCENARIOS: Scenario[] = [
       'One of everything zonal in each AZ — or the outage ends your IPO.',
     ],
   },
-  // ---------------------------------------------------------- Containers
+  // ------------------------------------------------------------ Scaling Up
   {
     id: 'replatform',
-    track: 'containers',
+    track: 'scaling',
     order: 1,
     difficulty: 2,
     title: 'The Replatform',
@@ -332,58 +313,10 @@ export const SCENARIOS: Scenario[] = [
       'API Gateway bills per request too. An ALB does the same job here for a flat $20.',
     ],
   },
-  // ---------------------------------------------------------- GenAI
-  {
-    id: 'prompt-rush',
-    track: 'genai',
-    order: 1,
-    difficulty: 2,
-    title: 'Prompt Rush',
-    emoji: '🤖',
-    hook: 'Your chatbot went viral. Bedrock’s quota did not.',
-    brief:
-      'Your AI support chatbot just went viral. Every request calls an LLM on Amazon Bedrock — which throttles at its 150 RPS on-demand quota and bills for every token. Survive the rush without melting the model or the budget.',
-    need: 'app',
-    baselineRps: 100,
-    spikeRps: 400,
-    spikeLabel: '🤖 Your bot is all over social media!',
-    budget: 150,
-    hasProbe: true,
-    requiredServices: ['bedrock'],
-    goalHints: [
-      'Bedrock throttles at 150 RPS on-demand — the spike is far bigger than that.',
-      'Users ask the same questions over and over. A cache in front of the model serves ~70% of prompts without an LLM call.',
-      'Cached answers also cost zero tokens. One cache fixes the quota AND the bill.',
-    ],
-  },
-  {
-    id: 'rag-grounded',
-    track: 'genai',
-    order: 2,
-    difficulty: 3,
-    title: 'Grounded',
-    emoji: '📚',
-    hook: 'Your chatbot cited a case that does not exist.',
-    brief:
-      'Your legal-tech client just found a citation in your bot’s answer to a court case that was never filed. New rule from their counsel: every answer must be grounded in their own document corpus. That means retrieve first, then generate — every single request now makes two hops before anyone gets an answer.',
-    need: 'app',
-    baselineRps: 150,
-    spikeRps: 450,
-    spikeLabel: '📚 Monday morning — the whole firm logs on!',
-    budget: 175,
-    hasProbe: true,
-    requiredServices: ['opensearch', 'bedrock'],
-    goalHints: [
-      'Retrieval grounds a request; it never answers one. OpenSearch must hand off to the model behind it.',
-      'Every request that reaches the model costs tokens and eats the 150 RPS quota — and the spike is 450.',
-      'A semantic cache in front of the chain answers repeats outright. Only the misses need retrieving and generating.',
-    ],
-  },
-  // ---------------------------------------------------------------- Data
   {
     id: 'the-feed',
-    track: 'data',
-    order: 1,
+    track: 'scaling',
+    order: 2,
     difficulty: 2,
     title: 'The Feed',
     emoji: '📰',
@@ -462,11 +395,10 @@ export const SCENARIOS: Scenario[] = [
       'Fixed fleets cannot help here: an Auto Scaling group tops out at 1,500 rps and Fargate at 2,000, and anything sized for 2,500 sits idle for the other thirty seconds of every round.',
     ],
   },
-  // ---------------------------------------------------------- Streaming
   {
     id: 'click-stream',
-    track: 'streaming',
-    order: 1,
+    track: 'event-driven',
+    order: 3,
     difficulty: 2,
     title: 'Click Stream',
     emoji: '🌊',
@@ -487,7 +419,54 @@ export const SCENARIOS: Scenario[] = [
       'The pipeline: Kinesis → Lambda consumers → SageMaker endpoint for scoring.',
     ],
   },
-  // ---------------------------------------------------------------- Day 2
+  // ----------------------------------------------------------------- GenAI
+  {
+    id: 'prompt-rush',
+    track: 'genai',
+    order: 1,
+    difficulty: 2,
+    title: 'Prompt Rush',
+    emoji: '🤖',
+    hook: 'Your chatbot went viral. Bedrock’s quota did not.',
+    brief:
+      'Your AI support chatbot just went viral. Every request calls an LLM on Amazon Bedrock — which throttles at its 150 RPS on-demand quota and bills for every token. Survive the rush without melting the model or the budget.',
+    need: 'app',
+    baselineRps: 100,
+    spikeRps: 400,
+    spikeLabel: '🤖 Your bot is all over social media!',
+    budget: 150,
+    hasProbe: true,
+    requiredServices: ['bedrock'],
+    goalHints: [
+      'Bedrock throttles at 150 RPS on-demand — the spike is far bigger than that.',
+      'Users ask the same questions over and over. A cache in front of the model serves ~70% of prompts without an LLM call.',
+      'Cached answers also cost zero tokens. One cache fixes the quota AND the bill.',
+    ],
+  },
+  {
+    id: 'rag-grounded',
+    track: 'genai',
+    order: 2,
+    difficulty: 3,
+    title: 'Grounded',
+    emoji: '📚',
+    hook: 'Your chatbot cited a case that does not exist.',
+    brief:
+      'Your legal-tech client just found a citation in your bot’s answer to a court case that was never filed. New rule from their counsel: every answer must be grounded in their own document corpus. That means retrieve first, then generate — every single request now makes two hops before anyone gets an answer.',
+    need: 'app',
+    baselineRps: 150,
+    spikeRps: 450,
+    spikeLabel: '📚 Monday morning — the whole firm logs on!',
+    budget: 175,
+    hasProbe: true,
+    requiredServices: ['opensearch', 'bedrock'],
+    goalHints: [
+      'Retrieval grounds a request; it never answers one. OpenSearch must hand off to the model behind it.',
+      'Every request that reaches the model costs tokens and eats the 150 RPS quota — and the spike is 450.',
+      'A semantic cache in front of the chain answers repeats outright. Only the misses need retrieving and generating.',
+    ],
+  },
+  // ----------------------------------------------------------------- Day 2
   {
     id: 'game-day',
     track: 'day2',
@@ -637,11 +616,10 @@ export const SCENARIOS: Scenario[] = [
       },
     ],
   },
-  // ---------------------------------------------------------- Going Global
   {
     id: 'blackout',
-    track: 'global',
-    order: 1,
+    track: 'day2',
+    order: 3,
     difficulty: 3,
     title: 'The Blackout',
     emoji: '🌑',

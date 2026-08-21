@@ -15,7 +15,7 @@ import {
   type LiteEdge,
   type TickStats,
 } from './engine'
-import { getScenario } from './scenarios'
+import { getScenario, nextScenario, scenariosInTrack, SCENARIOS, TRACKS } from './scenarios'
 import { SERVICES } from './services'
 
 const N = (id: string, serviceId: string, az?: 'a' | 'b'): LiteNode => ({ id, serviceId, az: az ?? null })
@@ -1215,5 +1215,49 @@ describe('The Shakedown: paying the ransom', () => {
     // The reference design lands at $90 of a $120 budget, so this one payment
     // is enough to lose the third star no matter how good the architecture is.
     expect(pay.surcharge! + 90).toBeGreaterThan(sc.budget)
+  })
+})
+
+describe('track structure', () => {
+  it('numbers every track 1..N with no gaps or duplicates', () => {
+    for (const track of TRACKS) {
+      if (track.id === 'custom') continue // player-authored; ordered at save time
+      const orders = SCENARIOS.filter((s) => s.track === track.id)
+        .map((s) => s.order)
+        .sort((a, b) => a - b)
+      expect(orders.length, `track "${track.id}" has no scenarios`).toBeGreaterThan(0)
+      expect(orders, `track "${track.id}" is not numbered 1..${orders.length}`).toEqual(
+        orders.map((_, i) => i + 1),
+      )
+    }
+  })
+
+  it('files every scenario under a track that exists', () => {
+    const ids = new Set(TRACKS.map((t) => t.id))
+    for (const s of SCENARIOS) expect(ids.has(s.track), `${s.id} → "${s.track}"`).toBe(true)
+  })
+
+  it('leaves no single-scenario tracks — a category of one is just noise', () => {
+    for (const track of TRACKS) {
+      if (track.id === 'custom') continue
+      expect(
+        SCENARIOS.filter((s) => s.track === track.id).length,
+        `"${track.name}" holds one scenario; fold it into a neighbour or give it a sibling`,
+      ).toBeGreaterThan(1)
+    }
+  })
+
+  it('walks nextScenario from the first mission to the last of each track', () => {
+    for (const track of TRACKS) {
+      if (track.id === 'custom') continue
+      const inTrack = scenariosInTrack(track.id)
+      let hops = 1
+      let cur = nextScenario(inTrack[0].id)
+      while (cur) {
+        hops += 1
+        cur = nextScenario(cur.id)
+      }
+      expect(hops, `"${track.name}" chain breaks before its last mission`).toBe(inTrack.length)
+    }
   })
 })

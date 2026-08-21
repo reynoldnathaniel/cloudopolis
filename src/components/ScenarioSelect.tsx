@@ -216,7 +216,9 @@ export function ScenarioSelect() {
               transition={{ delay: ti * 0.08 }}
             >
               <div className="mb-2 flex items-baseline gap-2">
-                <h2 className="text-sm font-bold text-slate-200">
+                {/* The name is the anchor for the whole section — it must never
+                    wrap mid-word. Only the description gives ground. */}
+                <h2 className="shrink-0 whitespace-nowrap text-sm font-bold text-slate-200">
                   {track.emoji} {track.name}
                 </h2>
                 <span className="text-[11px] text-slate-500">{track.description}</span>

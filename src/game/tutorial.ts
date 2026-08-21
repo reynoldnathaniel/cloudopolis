@@ -104,6 +104,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'done',
     title: "That's the game 🏆",
-    body: 'Build → simulate → read the Architect’s Notes → refine. Now explore the tracks: finish Foundations, then take on GenAI, Event-Driven, and Streaming. Good luck, architect!',
+    body: 'Build → simulate → read the Architect’s Notes → refine. Now explore the tracks: finish Foundations, then take on Scaling Up, Event-Driven, and GenAI — and when you are ready to be on call, Day 2. Good luck, architect!',
   },
 ]

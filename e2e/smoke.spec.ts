@@ -72,7 +72,7 @@ test.describe('SimCloud smoke', () => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await expect(page.getByRole('heading', { name: 'Choose your scenario' })).toBeVisible()
 
-    for (const track of ['Foundations', 'Containers', 'GenAI', 'Data', 'Event-Driven', 'Streaming', 'Going Global', 'Day 2', 'My Scenarios']) {
+    for (const track of ['Foundations', 'Scaling Up', 'Event-Driven', 'GenAI', 'Day 2', 'My Scenarios']) {
       await expect(page.getByRole('heading', { name: new RegExp(track) })).toBeVisible()
     }
     for (const title of ['Launch Day', 'PhotoShare', 'IPO Day', 'Prompt Rush', 'Grounded', 'Order Storm', 'Click Stream']) {
