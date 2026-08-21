@@ -297,6 +297,8 @@ function Canvas() {
 
 export default function GameScreen() {
   const returnToMenu = useGameStore((s) => s.returnToMenu)
+  const soundOn = useGameStore((s) => s.soundOn)
+  const toggleSound = useGameStore((s) => s.toggleSound)
   const isSandbox = useGameStore((s) => s.scenarioId === SANDBOX_ID)
 
   return (
@@ -309,13 +311,23 @@ export default function GameScreen() {
             </h1>
             <p className="text-[11px] text-slate-500">Build the architecture. Survive the traffic.</p>
           </div>
-          <button
-            onClick={returnToMenu}
-            title="Back to the main menu"
-            className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
-          >
-            ⌂
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={toggleSound}
+              title={soundOn ? 'Mute sound effects' : 'Unmute sound effects'}
+              aria-label={soundOn ? 'Mute sound' : 'Unmute sound'}
+              className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
+            >
+              {soundOn ? '🔊' : '🔇'}
+            </button>
+            <button
+              onClick={returnToMenu}
+              title="Back to the main menu"
+              className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
+            >
+              ⌂
+            </button>
+          </div>
         </header>
         {isSandbox ? <SandboxPanel /> : <ScenarioPanel />}
         <div className="border-t border-slate-800 pt-3">

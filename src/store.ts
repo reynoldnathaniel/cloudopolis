@@ -28,6 +28,7 @@ import { getScenario, SANDBOX_ID, type Decision, type Scenario } from './game/sc
 import { initialCustomScenarios, setCustomScenarios } from './game/customScenarios'
 import { SOLUTIONS, hasSolution, REVEAL_AFTER_FAILURES } from './game/solutions'
 import { achievementsAfter, type RunSummary } from './game/achievements'
+import { cuesForTransition, playCue, type SoundState } from './game/sound'
 import { TUTORIAL_STEPS } from './game/tutorial'
 import { SANDBOX_TUTORIAL_STEPS } from './game/sandboxTutorial'
 
@@ -157,6 +158,8 @@ interface GameStore {
    * history entry a person would expect from having moved one node once.
    */
   dragSnapshot: CanvasSnapshot | null
+  /** Cues play on run events and edits (persisted). On by default, quietly. */
+  soundOn: boolean
   /** Badge ids earned so far (persisted) */
   achievements: string[]
   /** Badges earned just now, queued for the toast. Transient. */
@@ -250,6 +253,7 @@ interface GameStore {
   unlockAchievement: (id: string) => void
   /** Clear the toast queue once it has been shown. */
   clearNewAchievements: () => void
+  toggleSound: () => void
   startRun: () => void
   /** Freeze / unfreeze the running simulation */
   togglePause: () => void
@@ -386,6 +390,7 @@ interface SaveData {
   sandboxTutorialDone?: boolean
   briefingSeen?: string[]
   achievements?: string[]
+  soundOn?: boolean
 }
 
 const loadSave = (): SaveData => {
@@ -448,6 +453,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   past: [],
   future: [],
   dragSnapshot: null,
+  // Default on: the cues are quiet and they are most of the feedback during a
+  // run. Anyone who disagrees gets one click to turn them off, and it sticks.
+  soundOn: SAVED.soundOn !== false,
   achievements: [
     ...new Set([
       ...(Array.isArray(SAVED.achievements) ? SAVED.achievements : []),
@@ -922,6 +930,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   clearNewAchievements: () => set({ newAchievements: [] }),
+
+  toggleSound: () => {
+    set({ soundOn: !get().soundOn })
+    flushSave()
+  },
 
   startRun: () => {
     const state = get()
@@ -1548,29 +1561,70 @@ export const useGameStore = create<GameStore>()((set, get) => ({
 
 // Persist progress on every store change, throttled. The graph is tiny, so a
 // JSON serialize every ~800ms during runs is negligible.
+function writeSave(): void {
+  const s = useGameStore.getState()
+  try {
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        scenarioId: s.scenarioId,
+        nodes: s.nodes,
+        edges: s.edges,
+        bestStars: s.bestStars,
+        failedRuns: s.failedRuns,
+        tutorialDone: s.tutorialDone,
+        sandboxTutorialDone: s.sandboxTutorialDone,
+        briefingSeen: s.briefingSeen,
+        achievements: s.achievements,
+        soundOn: s.soundOn,
+      }),
+    )
+  } catch {
+    // Storage full or blocked — losing autosave is not fatal.
+  }
+}
+
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 useGameStore.subscribe(() => {
   if (persistTimer) return
   persistTimer = setTimeout(() => {
     persistTimer = null
-    const s = useGameStore.getState()
-    try {
-      localStorage.setItem(
-        SAVE_KEY,
-        JSON.stringify({
-          scenarioId: s.scenarioId,
-          nodes: s.nodes,
-          edges: s.edges,
-          bestStars: s.bestStars,
-          failedRuns: s.failedRuns,
-          tutorialDone: s.tutorialDone,
-          sandboxTutorialDone: s.sandboxTutorialDone,
-          briefingSeen: s.briefingSeen,
-          achievements: s.achievements,
-        }),
-      )
-    } catch {
-      // Storage full or blocked — losing autosave is not fatal.
-    }
+    writeSave()
   }, 800)
+})
+
+/** Write immediately, for settings the player deliberately changed. Waiting out
+ *  the throttle is fine for a canvas; it is not fine for a preference someone
+ *  set and then closed the tab on. */
+export function flushSave(): void {
+  writeSave()
+}
+
+// ---- sound ----
+// One subscriber, diffing consecutive states, instead of play() calls scattered
+// through the actions and the components. The rules live in a pure function so
+// they can be tested without an AudioContext; this is only the plumbing.
+function soundStateOf(s: GameStore): SoundState {
+  return {
+    phase: s.phase,
+    runPhase: s.runPhase,
+    attackRps: s.attackRps,
+    hasPendingDecision: s.pendingDecision !== null,
+    stars: s.results?.stars ?? null,
+    nodeCount: s.nodes.length,
+    edgeCount: s.edges.length,
+    achievementCount: s.achievements.length,
+  }
+}
+
+let lastSound: SoundState = soundStateOf(useGameStore.getState())
+
+useGameStore.subscribe((state) => {
+  const next = soundStateOf(state)
+  const cues = cuesForTransition(lastSound, next)
+  // The snapshot advances whether or not sound is on, so switching it back on
+  // mid-run does not replay everything that happened while it was off.
+  lastSound = next
+  if (!state.soundOn) return
+  for (const cue of cues) playCue(cue)
 })

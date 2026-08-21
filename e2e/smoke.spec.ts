@@ -108,6 +108,25 @@ test.describe('SimCloud smoke', () => {
     await expect(page.getByText('✓ $15/mo')).toBeVisible()
   })
 
+  test('the sound toggle flips and is remembered', async ({ page }) => {
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    // Reachable before a run starts, not only from inside a level.
+    const mute = page.getByRole('button', { name: 'Mute sound' })
+    await expect(mute).toBeVisible()
+    await mute.click()
+    await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible()
+
+    await page.reload()
+    await page.getByRole('button', { name: /Choose a scenario/ }).click()
+    await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible()
+
+    // ...and the same control is in the sidebar once you are building.
+    await page.getByRole('button', { name: /Launch Day/ }).click()
+    await page.getByRole('button', { name: /Let's build/ }).click()
+    await page.getByRole('button', { name: 'Unmute sound' }).click()
+    await expect(page.getByRole('button', { name: 'Mute sound' })).toBeVisible()
+  })
+
   test('undo and redo walk the canvas back one edit at a time', async ({ page }) => {
     await page.getByRole('button', { name: /Choose a scenario/ }).click()
     await page.getByRole('button', { name: /Launch Day/ }).click()

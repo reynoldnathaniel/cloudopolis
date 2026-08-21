@@ -158,6 +158,22 @@ cannot run before a canvas exists. `GameScreen` hands them over via `provideFlow
   Drain** instead of instant service.
 - **VPC, Availability Zone, and Region containers** — React Flow subflows with drag re-parenting.
 
+### Sound
+
+Short synthesized cues — a run starting, traffic spiking, a Region going dark, the botnet opening
+up, the pager going off, and a different chord for three stars, a pass and a failure. Everything is
+a handful of oscillator notes with an envelope: no audio files, no licences, nothing to download,
+and blips suit a simulator better than stock foley. The master gain is deliberately low; 🔊 in the
+sidebar or on the scenario screen mutes it, and that preference is written immediately rather than
+waiting out the autosave throttle.
+
+There are no `play()` calls in the store or the components. A single subscriber diffs consecutive
+store states and asks one pure function, `cuesForTransition(prev, next)`, what to play — so the
+trigger rules are unit-testable with no AudioContext, and every cue keys off a *transition* rather
+than a state. That distinction is the whole feature: Trivia Night re-enters its spike phase ten
+times a run and attack traffic changes on every tick, so playing on the state instead of the edge
+would turn either into a machine gun.
+
 ### Undo / redo
 
 ⌘Z / Ctrl+Z and ⌘⇧Z / Ctrl+Y, or the ↶ ↷ buttons on the canvas controls. Adding a service,
@@ -376,7 +392,7 @@ replaying the level by hand.
 
 ## Roadmap
 
-- Korean localization · sound effects
+- Korean localization
 
 ---
 

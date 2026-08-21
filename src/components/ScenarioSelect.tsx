@@ -182,6 +182,8 @@ export function ScenarioSelect() {
   const customCount = useGameStore((s) => s.customScenarios.length)
   const earned = useGameStore((s) => s.achievements.length)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const soundOn = useGameStore((s) => s.soundOn)
+  const toggleSound = useGameStore((s) => s.toggleSound)
 
   return (
     <div className="h-screen w-screen overflow-y-auto bg-slate-950 text-slate-100">
@@ -197,6 +199,14 @@ export function ScenarioSelect() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={toggleSound}
+              title={soundOn ? 'Mute sound effects' : 'Unmute sound effects'}
+              aria-label={soundOn ? 'Mute sound' : 'Unmute sound'}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
+            >
+              {soundOn ? '🔊' : '🔇'}
+            </button>
             <button
               onClick={() => setGalleryOpen(true)}
               className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-400 transition hover:border-amber-500/60 hover:text-amber-300"
