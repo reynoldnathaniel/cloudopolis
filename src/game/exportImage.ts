@@ -80,7 +80,7 @@ export async function captureCanvas(bounds: Rect, width = 1280, height = 720): P
 export async function exportCanvasPng(bounds: Rect, name: string): Promise<boolean> {
   const dataUrl = await captureCanvas(bounds)
   if (!dataUrl) return false
-  download(dataUrl, `simcloud-${slug(name)}.png`)
+  download(dataUrl, `cloudopolis-${slug(name)}.png`)
   return true
 }
 
@@ -160,8 +160,8 @@ export async function exportShareCard(bounds: Rect, info: ShareCardInfo): Promis
   ctx.fillRect(0, H - FOOTER, W, FOOTER)
   ctx.fillStyle = '#64748b'
   ctx.font = '16px system-ui, -apple-system, sans-serif'
-  ctx.fillText(`SimCloud · ${info.origin}`, 36, H - FOOTER / 2)
+  ctx.fillText(`Cloudopolis · ${info.origin}`, 36, H - FOOTER / 2)
 
-  download(canvas.toDataURL('image/png'), `simcloud-${slug(info.title)}-${info.stars}star.png`)
+  download(canvas.toDataURL('image/png'), `cloudopolis-${slug(info.title)}-${info.stars}star.png`)
   return true
 }

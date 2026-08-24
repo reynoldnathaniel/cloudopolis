@@ -134,7 +134,7 @@ function ExportImport() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'simcloud-scenarios.json'
+    a.download = 'cloudopolis-scenarios.json'
     a.click()
     URL.revokeObjectURL(url)
   }

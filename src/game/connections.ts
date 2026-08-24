@@ -24,7 +24,7 @@
 //
 // Some blocked pairs ARE real AWS — EventBridge genuinely targets SNS and API
 // Gateway, DynamoDB has Streams, S3 has event notifications, a Lambda can
-// absolutely put a message on a queue. SimCloud does not simulate any of that,
+// absolutely put a message on a queue. Cloudopolis does not simulate any of that,
 // so the copy says "not simulated here" and never "impossible in AWS". Telling
 // someone a real architecture is illegal would be worse than the silent edge
 // this whole file exists to remove.
@@ -94,7 +94,7 @@ function rejectionMessage(source: ServiceDef, target: ServiceDef): string {
 
   switch (source.role) {
     case 'origin-static':
-      return `${source.name} stores objects and serves them — a request that reaches it is answered there. (Real S3 can fire event notifications; SimCloud doesn't simulate those.)`
+      return `${source.name} stores objects and serves them — a request that reaches it is answered there. (Real S3 can fire event notifications; Cloudopolis doesn't simulate those.)`
 
     case 'db':
       return `${source.name} answers the request that reached it, so it's the end of the line. (Change streams like DynamoDB Streams are real AWS, but not simulated here.)`
@@ -108,7 +108,7 @@ function rejectionMessage(source: ServiceDef, target: ServiceDef): string {
 
     case 'fanout':
       if (target.role === 'router' || target.role === 'fanout')
-        return `In AWS ${source.name} really can target an API or another bus — SimCloud only simulates delivery to queues and functions.`
+        return `In AWS ${source.name} really can target an API or another bus — Cloudopolis only simulates delivery to queues and functions.`
       return `${source.name} delivers events to queues and functions. Put a consumer on this rule, and let it write to ${to}.`
 
     case 'queue':

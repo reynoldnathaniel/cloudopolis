@@ -350,7 +350,7 @@ export default function GameScreen() {
         <header className="flex items-start justify-between">
           <div>
             <h1 className="bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-xl font-black tracking-tight text-transparent">
-              SimCloud
+              Cloudopolis
             </h1>
             <p className="text-[11px] text-slate-500">Build the architecture. Survive the traffic.</p>
           </div>

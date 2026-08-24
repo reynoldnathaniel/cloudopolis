@@ -1,4 +1,4 @@
-# SimCloud ☁️
+# Cloudopolis ☁️
 
 **An interactive browser game for learning AWS architecture.**
 
@@ -237,7 +237,7 @@ scoring as the built-ins.
 
 Every custom scenario has a **share code** (📋 on its card): one paste-able string that
 carries the whole mission. Anyone can import it from the editor — no backend, no account.
-That makes SimCloud a workshop tool: author a mission that mirrors a team's real workload,
+That makes Cloudopolis a workshop tool: author a mission that mirrors a team's real workload,
 drop the code in chat, and everyone designs against it. Imports are sanitized (lengths
 capped, numbers clamped, service ids validated) and always get a fresh id, so a code can
 never overwrite or impersonate an existing scenario.

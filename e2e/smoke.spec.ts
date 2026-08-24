@@ -44,13 +44,13 @@ async function connect(page: Page, fromSelector: string, toSelector: string) {
 
 const edgeCount = (page: Page) => page.locator('.react-flow__edge').count()
 
-test.describe('SimCloud smoke', () => {
+test.describe('Cloudopolis smoke', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
   })
 
   test('main menu renders, with no Continue on a fresh profile', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'SimCloud' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Cloudopolis' })).toBeVisible()
     await expect(page.getByRole('button', { name: /Learn to play/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Choose a scenario/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Sandbox/ })).toBeVisible()

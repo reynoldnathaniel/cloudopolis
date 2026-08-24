@@ -379,6 +379,10 @@ let idCounter = 0
 
 // ---- persistence (localStorage) ----
 
+// Named for the game's old title. Renaming this key would orphan every
+// existing player's stars, achievements and unlocks for no visible gain —
+// it is a storage version tag, not branding. Same for CUSTOM_KEY and the
+// SC1 share-code prefix in customScenarios.ts.
 const SAVE_KEY = 'simcloud-save-v1'
 
 interface SaveData {

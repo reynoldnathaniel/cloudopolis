@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build SimCloud and publish it to S3 + CloudFront.
+# Build Cloudopolis and publish it to S3 + CloudFront.
 #
 #   ./scripts/deploy.sh
 #

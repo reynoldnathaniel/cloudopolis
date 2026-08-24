@@ -27,7 +27,7 @@ export function MenuScreen() {
       >
         <div className="text-6xl">☁️</div>
         <h1 className="mt-3 bg-gradient-to-r from-cyan-400 via-sky-400 to-indigo-400 bg-clip-text text-6xl font-black tracking-tight text-transparent">
-          SimCloud
+          Cloudopolis
         </h1>
         <p className="mt-2 text-sm text-slate-400">Build the architecture. Survive the traffic.</p>
 

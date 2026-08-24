@@ -38,6 +38,7 @@ export function Palette() {
                     disabled={disabled}
                     title={tooltip}
                     onDragStart={(e) => {
+                      // Legacy identifier: private to this drag, never shown or stored.
                       e.dataTransfer.setData('application/simcloud', def.id)
                       e.dataTransfer.effectAllowed = 'move'
                     }}

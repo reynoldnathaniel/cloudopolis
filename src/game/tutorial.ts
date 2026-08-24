@@ -41,7 +41,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'welcome',
     title: 'Welcome, architect! ☁️',
-    body: 'In SimCloud you design AWS architectures that survive real traffic. Each level is a scenario with a budget — build it, stress-test it, earn three stars.',
+    body: 'In Cloudopolis you design AWS architectures that survive real traffic. Each level is a scenario with a budget — build it, stress-test it, earn three stars.',
   },
   {
     id: 'brief',

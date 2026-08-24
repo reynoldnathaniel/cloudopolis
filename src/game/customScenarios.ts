@@ -9,7 +9,10 @@
 import { registerCustomScenarios, type Scenario } from './scenarios'
 import { SERVICES } from './services'
 
+// Legacy name, deliberately kept — see the note on SAVE_KEY in store.ts.
 export const CUSTOM_KEY = 'simcloud-custom-v1'
+// 'SC1' = the game's old initials. This is a wire-format version marker:
+// changing it would invalidate every share code already sent to anyone.
 const SHARE_PREFIX = 'SC1.'
 
 export const LIMITS = {
