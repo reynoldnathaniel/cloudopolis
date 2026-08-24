@@ -90,6 +90,9 @@ style you want to learn.
 - **Security probe** — attackers scan for resources wired straight to Users. Public S3 buckets,
   exposed databases and caches, and naked compute all fail the Security pillar. Only CloudFront,
   ALB, and API Gateway belong on the internet edge.
+![FlashSale mid-run: Availability Zone A is dark with skull markers while Zone B serves 100% of the sale](docs/screens/outage.png)
+*FlashSale's outage: Zone A dies mid-sale, and the design survives because everything zonal exists in both boxes.*
+
 - **Elastic fleets** — Auto Scaling groups (2–10 instances × 150 rps) and Fargate services
   (2–20 tasks × 100 rps) both step toward demand rather than arriving instantly, and the step
   *rate* is their personality: containers add 600 rps of capacity per tick, VMs 300. Sharp
@@ -181,6 +184,8 @@ making is worse than having no history.
 
 ### Achievements
 
+![The achievements gallery, 7 of 14 unlocked](docs/screens/achievements.png)
+
 Fourteen badges, behind a `🏆` button on the scenario screen. Locked ones are shown with their
 description rather than hidden — they are meant to read as things worth trying.
 
@@ -215,6 +220,8 @@ never hand out an answer that doesn't actually work.
 
 ### The scenario editor
 
+![The scenario editor: story fields, difficulty, traffic and budget sliders, with a live card preview](docs/screens/editor.png)
+
 The 🛠️ **My Scenarios** track has a full in-game editor: write the story, set the
 traffic profile and budget, toggle events (probe / VPC / AZ outage), cycle any service
 through *allowed → required → banned* with a reason, and add hints — with a live card
@@ -234,6 +241,9 @@ skipping scenarios you already have — an idempotent backup/restore that surviv
 browser data and moves libraries between machines.
 
 ### 🧪 Sandbox mode
+
+![The sandbox: a two-instance EC2 fleet overloading under a 2,000 rps dial, with the live hint explaining why](docs/screens/sandbox.png)
+*Turn the dial to 2,000 rps and watch two EC2s drown — the amber hint tells you exactly why.*
 
 A blank region with **no budget, no scoring, and no script**. Press ▶ and the simulation
 runs *endlessly* while you drive it: a live traffic dial (10 → 20,000 rps with one-tap
@@ -267,6 +277,9 @@ fire the security probe. Replay it any time from the sandbox panel.
   recovered. Hover to scrub a crosshair and read real values at any moment; click for a
   full CloudWatch-style view with dual axes (served % left, rps right), a budget reference
   line, worst-served callout, and a legend that isolates any series.
+
+![The expanded run timeline: phase bands for baseline, spike, probe and outage under served %, traffic and cost curves](docs/screens/timeline.png)
+
 - Progress persistence in `localStorage` — best stars per scenario, tutorial completion, and the
   canvas itself, so **Continue** survives a reload.
 - Official **AWS Architecture Icons** in nodes and palette.
