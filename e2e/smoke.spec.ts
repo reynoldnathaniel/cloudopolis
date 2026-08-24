@@ -106,6 +106,16 @@ test.describe('Cloudopolis smoke', () => {
     await expect(page.getByText('✓ 100%').first()).toBeVisible()
     await expect(page.getByText('clean')).toBeVisible()
     await expect(page.getByText('✓ $15/mo')).toBeVisible()
+
+    // Par: this IS the reference design, so it should land dead on it.
+    await expect(page.getByText(/Par \$15\/mo/)).toBeVisible()
+    await expect(page.getByText(/Dead on par/)).toBeVisible()
+
+    // ...and the three-star run leaves a personal best on the select card.
+    // Launch Day has a next scenario, so the map is reached via the sidebar.
+    await page.getByRole('button', { name: /Next scenario/ }).click()
+    await page.getByText(/change scenario/).click()
+    await expect(page.getByText('best $15/mo')).toBeVisible()
   })
 
   test('the sound toggle flips and is remembered', async ({ page }) => {

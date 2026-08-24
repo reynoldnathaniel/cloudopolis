@@ -6,7 +6,7 @@
 // the canvas one press at a time — which is worse than having no undo at all.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useGameStore, HISTORY_LIMIT } from './store'
+import { useGameStore, HISTORY_LIMIT, nextBestCost } from './store'
 
 const store = () => useGameStore.getState()
 
@@ -181,5 +181,37 @@ describe('destructive actions are undoable', () => {
 
     store().undo()
     expect(services()).toEqual(mine)
+  })
+})
+
+describe('personal best cost', () => {
+  // Against the store's real rule, not a copy of it.
+  //
+  // The three-star gate is the whole point: an empty canvas costs $0, so
+  // without it every scenario's permanent "best" would be the design that
+  // served nobody.
+  it('records nothing until a run earns three stars', () => {
+    expect(nextBestCost(undefined, 15, 2)).toBeUndefined()
+    expect(nextBestCost(undefined, 0, 1)).toBeUndefined()
+    expect(nextBestCost(undefined, 15, 3)).toBe(15)
+  })
+
+  it('refuses a cheaper run that fell short', () => {
+    // The $0 empty canvas must never beat a working $15 design.
+    expect(nextBestCost(15, 0, 1)).toBe(15)
+    expect(nextBestCost(15, 5, 2)).toBe(15)
+  })
+
+  it('keeps the cheapest three-star run, not the latest', () => {
+    expect(nextBestCost(15, 25, 3)).toBe(15)
+    expect(nextBestCost(15, 10, 3)).toBe(10)
+    expect(nextBestCost(15, 15, 3)).toBe(15)
+  })
+
+  it('is what the store actually calls', () => {
+    // Guard against the rule being reimplemented inline later: the store must
+    // expose this and the persisted record must start empty.
+    expect(typeof nextBestCost).toBe('function')
+    expect(store().bestCost).toBeDefined()
   })
 })

@@ -307,6 +307,27 @@ describe('reference solutions', () => {
         ).toBe(3)
       })
 
+      it('costs exactly what its pinned par says', () => {
+        // The results modal shows this number to the player as the score to
+        // beat, so it cannot be allowed to drift away from what the design
+        // actually costs. Rebalance services or scenarios and this fails here,
+        // in the suite, instead of quietly lying on the results screen.
+        const r = simulateRun(scenario, solution)
+        expect(
+          r.cost,
+          `${scenario.id}: par says $${solution.parCost}, the run costs $${r.cost} — update parCost in solutions.ts`,
+        ).toBe(solution.parCost)
+      })
+
+      it('sets a par a player could plausibly aim at', () => {
+        // Par is the reference answer's cost, so it must fit the budget it was
+        // authored against. Measured range is 50%-96% of budget.
+        expect(solution.parCost).toBeGreaterThan(0)
+        expect(solution.parCost, `${scenario.id} par exceeds its own budget`).toBeLessThanOrEqual(
+          scenario.budget,
+        )
+      })
+
       it('uses only services the scenario allows', () => {
         for (const n of solution.nodes) {
           expect(SERVICES[n.serviceId], `unknown service "${n.serviceId}"`).toBeDefined()

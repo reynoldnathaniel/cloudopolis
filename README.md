@@ -381,6 +381,18 @@ src/
   App.tsx
 ```
 
+### Par cost
+
+Every built-in scenario's reference answer carries a `parCost` — what that design
+costs when it runs, including decision surcharges and any per-request bill an attack
+ran up. The results screen shows it next to your own bill, and the scenario cards
+show your cheapest **three-star** run. Par is pinned by hand and re-derived by
+`solutions.test.ts` on every run, so a rebalance that moves a reference design's cost
+fails the suite rather than quietly showing players a stale number.
+
+Par is the published answer's cost, not a target tuned to be beatable — on the tight
+levels, matching it is the win.
+
 ### Which wires you can draw
 
 `src/game/connections.ts` holds a **role-level** compatibility matrix, read straight off

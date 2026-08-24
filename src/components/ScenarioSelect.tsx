@@ -36,7 +36,18 @@ const cardCls = (isCurrent: boolean) =>
     isCurrent ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-slate-700/70 bg-slate-900/60'
   }`
 
-function CardBody({ sc, earned, isCurrent }: { sc: Scenario; earned: number; isCurrent: boolean }) {
+function CardBody({
+  sc,
+  earned,
+  isCurrent,
+  best,
+}: {
+  sc: Scenario
+  earned: number
+  isCurrent: boolean
+  /** Cheapest three-star run so far, or undefined if never three-starred. */
+  best?: number
+}) {
   return (
     <>
       <div className="flex items-start justify-between">
@@ -51,16 +62,22 @@ function CardBody({ sc, earned, isCurrent }: { sc: Scenario; earned: number; isC
       </div>
       <div className="mt-2 flex items-center justify-between">
         <Dots n={sc.difficulty} />
-        <span className="text-[9px] text-slate-500">
-          {isCurrent ? 'current' : `$${sc.budget}/mo budget`}
-        </span>
+        {best !== undefined ? (
+          <span className="text-[9px] font-semibold text-emerald-400/90" title="Your cheapest three-star run">
+            best ${best}/mo
+          </span>
+        ) : (
+          <span className="text-[9px] text-slate-500">
+            {isCurrent ? 'current' : `$${sc.budget}/mo budget`}
+          </span>
+        )}
       </div>
     </>
   )
 }
 
 /** A custom-track card: playable like the others, plus share/edit/delete actions. */
-function CustomCard({ sc, earned, isCurrent }: { sc: Scenario; earned: number; isCurrent: boolean }) {
+function CustomCard({ sc, earned, isCurrent, best }: { sc: Scenario; earned: number; isCurrent: boolean; best?: number }) {
   const playScenario = useGameStore((s) => s.playScenario)
   const openEditor = useGameStore((s) => s.openEditor)
   const deleteCustomScenario = useGameStore((s) => s.deleteCustomScenario)
@@ -76,7 +93,7 @@ function CustomCard({ sc, earned, isCurrent }: { sc: Scenario; earned: number; i
       onKeyDown={(e) => e.key === 'Enter' && playScenario(sc.id)}
       className={`cursor-pointer ${cardCls(isCurrent)}`}
     >
-      <CardBody sc={sc} earned={earned} isCurrent={isCurrent} />
+      <CardBody sc={sc} earned={earned} isCurrent={isCurrent} best={best} />
       <div className="mt-2 flex gap-1 border-t border-slate-800 pt-2">
         <button
           onClick={(e) =>
@@ -177,6 +194,7 @@ export function ScenarioSelect() {
   const openEditor = useGameStore((s) => s.openEditor)
   const openSandbox = useGameStore((s) => s.openSandbox)
   const bestStars = useGameStore((s) => s.bestStars)
+  const bestCost = useGameStore((s) => s.bestCost)
   const currentId = useGameStore((s) => s.scenarioId)
   // Re-render the custom section when authored scenarios change.
   const customCount = useGameStore((s) => s.customScenarios.length)
@@ -249,11 +267,12 @@ export function ScenarioSelect() {
                 {scenariosInTrack(track.id).map((sc) => {
                   const earned = bestStars[sc.id] ?? 0
                   const isCurrent = sc.id === currentId
+                  const best = bestCost[sc.id]
                   return track.id === 'custom' ? (
-                    <CustomCard key={sc.id} sc={sc} earned={earned} isCurrent={isCurrent} />
+                    <CustomCard key={sc.id} sc={sc} earned={earned} isCurrent={isCurrent} best={best} />
                   ) : (
                     <button key={sc.id} onClick={() => playScenario(sc.id)} className={cardCls(isCurrent)}>
-                      <CardBody sc={sc} earned={earned} isCurrent={isCurrent} />
+                      <CardBody sc={sc} earned={earned} isCurrent={isCurrent} best={best} />
                     </button>
                   )
                 })}

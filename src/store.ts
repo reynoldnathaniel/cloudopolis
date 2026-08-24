@@ -144,6 +144,10 @@ interface GameStore {
   breachedNodeIds: string[]
   /** Best star count earned per scenario id (persisted) */
   bestStars: Record<string, number>
+  /** Cheapest THREE-STAR run per scenario id (persisted). Only a design that
+   *  actually worked can set a record — otherwise an empty canvas costing $0
+   *  would be everyone's permanent "best". */
+  bestCost: Record<string, number>
   /** Completed runs that fell short of 3 stars, per scenario id (persisted).
    *  Two of them unlock the reference-answer reveal. */
   failedRuns: Record<string, number>
@@ -390,6 +394,7 @@ interface SaveData {
   nodes?: Node[]
   edges?: Edge[]
   bestStars?: Record<string, number>
+  bestCost?: Record<string, number>
   failedRuns?: Record<string, number>
   tutorialDone?: boolean
   sandboxTutorialDone?: boolean
@@ -423,6 +428,23 @@ if (savedGraphOk) {
   }
 }
 
+/**
+ * The cheapest-run record after a finished run, or the old one unchanged.
+ *
+ * Three stars is the gate, and it is the whole point: an empty canvas costs
+ * $0, so without it every scenario's permanent "best" would be the design that
+ * served nobody. Exported so the rule is testable on its own — the only other
+ * caller is the run-end block, which is a 15-second simulation away.
+ */
+export function nextBestCost(
+  prior: number | undefined,
+  cost: number,
+  stars: number,
+): number | undefined {
+  if (stars < 3) return prior
+  return prior === undefined || cost < prior ? cost : prior
+}
+
 const serviceIdOf = (n: Node): string =>
   n.type === 'users' ? 'users' : ((n.data as { serviceId?: string }).serviceId ?? 'users')
 
@@ -453,6 +475,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   deadNodeIds: [],
   breachedNodeIds: [],
   bestStars: SAVED.bestStars ?? {},
+  bestCost: SAVED.bestCost ?? {},
   // Milestones are recomputed from the star record on load, so anyone who
   // already finished a track before badges existed has it waiting for them.
   past: [],
@@ -618,9 +641,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     setCustomScenarios(next)
     const { [id]: _gone, ...bestStars } = get().bestStars
     const { [id]: _alsoGone, ...failedRuns } = get().failedRuns
+    const { [id]: _costGone, ...bestCost } = get().bestCost
     set({
       customScenarios: next,
       bestStars,
+      bestCost,
       failedRuns,
       briefingSeen: get().briefingSeen.filter((b) => b !== id),
     })
@@ -1409,6 +1434,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
             ...get().bestStars,
             [scenario.id]: Math.max(get().bestStars[scenario.id] ?? 0, stars),
           }
+          const priorCost = get().bestCost[scenario.id]
+          const recordCost = nextBestCost(priorCost, scoredCost, stars)
+          const nextCosts =
+            recordCost === priorCost
+              ? get().bestCost
+              : { ...get().bestCost, [scenario.id]: recordCost! }
           const summary: RunSummary = {
             scenario,
             stars,
@@ -1430,6 +1461,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
             achievements: fresh.length ? [...already, ...fresh] : already,
             newAchievements: fresh,
             bestStars: nextBestStars,
+            bestCost: nextCosts,
             // Only completed runs count, and only short ones. Two of these
             // unlock the reference answer for this scenario.
             failedRuns:
@@ -1581,6 +1613,7 @@ function writeSave(): void {
         nodes: s.nodes,
         edges: s.edges,
         bestStars: s.bestStars,
+        bestCost: s.bestCost,
         failedRuns: s.failedRuns,
         tutorialDone: s.tutorialDone,
         sandboxTutorialDone: s.sandboxTutorialDone,

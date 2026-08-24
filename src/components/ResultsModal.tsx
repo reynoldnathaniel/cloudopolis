@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useGameStore } from '../store'
 import { RunTimeline } from './RunTimeline'
 import { exportShareCard } from '../game/exportImage'
+import { SOLUTIONS } from '../game/solutions'
 
 function Star({ earned, delay }: { earned: boolean; delay: number }) {
   return (
@@ -34,6 +35,32 @@ function Pillar({ label, value, pass, target }: { label: string; value: string; 
   )
 }
 
+/**
+ * How this bill compares with the reference design's.
+ *
+ * Par is what the *published answer* costs, not a target the level was tuned
+ * to make beatable — on a tight level, matching it is the win. So the copy
+ * congratulates a match and stays neutral about being over, rather than
+ * scolding someone for a design that already earned three stars.
+ */
+function ParLine({ par, cost }: { par: number; cost: number }) {
+  const delta = cost - par
+  const [tone, message] =
+    delta === 0
+      ? ['text-emerald-300', '⛳ Dead on par — the reference design costs exactly this.']
+      : delta < 0
+        ? ['text-amber-300', `🏅 $${-delta}/mo under par — cheaper than the reference design.`]
+        : ['text-slate-400', `$${delta}/mo over par.`]
+  return (
+    <div className="mt-2 flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+      <span className="text-[10px] text-slate-500">
+        Par <span className="font-bold tabular-nums text-slate-300">${par}/mo</span> · reference design
+      </span>
+      <span className={`text-[10px] font-semibold ${tone}`}>{message}</span>
+    </div>
+  )
+}
+
 export function ResultsModal() {
   const results = useGameStore((s) => s.results)
   const nodes = useGameStore((s) => s.nodes)
@@ -50,6 +77,9 @@ export function ResultsModal() {
   const openSelect = useGameStore((s) => s.openSelect)
 
   const show = phase === 'results' && results !== null
+  // Par is the reference design's bill. Built-in scenarios only — nothing
+  // authored in the editor has an answer to measure against.
+  const par = SOLUTIONS[scenario.id]?.parCost ?? null
   const next = nextScenario(scenario.id)
   const track = TRACKS.find((t) => t.id === scenario.track)
 
@@ -194,6 +224,10 @@ export function ResultsModal() {
                 pass={results.costAtBaseline <= results.budget}
               />
             </div>
+
+            {par !== null && (
+              <ParLine par={par} cost={results.costAtBaseline} />
+            )}
 
             {results.decisions.length > 0 && (
               <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-800/40 p-3">
