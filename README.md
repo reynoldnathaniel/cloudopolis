@@ -15,6 +15,9 @@ Users ──▶ CloudFront ──▶ S3          ★★★  $15/mo
 Users ──▶ S3                         ★☆☆  saturated at 2,000 rps + public bucket flagged
 ```
 
+![A botnet throws 6,000 junk requests per second at the design; the WAF scrubs all of it at the edge while Fargate scales to six tasks](docs/screens/under-attack.png)
+*The Shakedown, mid-run: 6,000 junk requests a second dying at the WAF while real users get served.*
+
 ---
 
 ## Quick start
@@ -34,6 +37,7 @@ Other scripts:
 | `npm run build` | Type-check (`tsc -b`) + production bundle into `dist/` |
 | `npm test` | Vitest — engine balance tests (every level's solution pinned to its stars) plus import-validation tests |
 | `npm run preview` | Serve the production build locally |
+| `node scripts/capture-screens.mjs` | Regenerate the README screenshots against a running preview |
 
 ---
 
@@ -52,6 +56,9 @@ Other scripts:
 New here? The main menu has an **11-step guided tutorial** that walks you through Level 1 —
 build it, fail the spike, get flagged by the security probe, fix both with a CDN, three stars.
 
+![A mission briefing: the story, the traffic profile, the win conditions, and the services the scenario requires or bans](docs/screens/briefing.png)
+*Every mission opens with a story and explicit win conditions — including the services it requires, and the ones it bans.*
+
 ---
 
 ## What's in it
@@ -69,6 +76,9 @@ style you want to learn.
 | 🤖 **GenAI** | Prompt Rush · Grounded | Bedrock's quota and token costs beaten by a semantic cache; then RAG — every request must *retrieve then generate*, so the cache is what makes the quota survivable at all |
 | 🚨 **Day 2** | Game Day · The Shakedown · The Blackout | The design is already shipped; now you are on call. Incidents interrupt the run and you answer them live, and every offer is answerable with money — which is the point, because emergency capacity is billed to the same budget you are scored against. Then a botnet, and the two ways a flood kills you: it eats the capacity your customers needed, or you absorb all of it and get invoiced per request for serving a botnet. Then the last exam: an entire Region goes dark and the app stays up |
 | 🛠️ **My Scenarios** | *yours* | Author your own missions in the built-in scenario editor |
+
+![The mission-select screen: five tracks of scenario cards with star ratings and personal best costs](docs/screens/scenario-select.png)
+*Stars and personal-best costs live on the cards, so the map doubles as a progress board.*
 
 ### Loading
 
@@ -121,6 +131,9 @@ cannot run before a canvas exists. `GameScreen` hands them over via `provideFlow
   is quiet between bursts goes cold again before every one of them. Provisioned concurrency buys a
   floor that never goes cold. Paired with **burst traffic**: a square wave that slams between peak
   and idle with no ramp, because a ramp gives a function all the time it needs to warm up.
+![An incident interrupts the run: a ransom demand with a countdown, answer it or the runbook default applies](docs/screens/incident.png)
+*Day 2 levels page you mid-run. Every offer can be answered with money — billed to the same budget you are scored on.*
+
 - **Mid-run decisions** — an incident can interrupt a run: the simulation freezes, a countdown starts,
   and two options wait. Answer, or the scenario's runbook default is applied for you. Effects stack and
   expire independently (emergency capacity bought at the top of a spike is still there when a leak
@@ -393,6 +406,9 @@ fails the suite rather than quietly showing players a stale number.
 Par is the published answer's cost, not a target tuned to be beatable — on the tight
 levels, matching it is the win.
 
+![The results screen: three stars, the run timeline, six scored pillars, the par line, and three achievements unlocking](docs/screens/results.png)
+*Three stars on The Shakedown: every pillar, the run timeline, par — and the achievements it just unlocked.*
+
 ### Which wires you can draw
 
 `src/game/connections.ts` holds a **role-level** compatibility matrix, read straight off
@@ -416,9 +432,20 @@ replaying the level by hand.
 
 ---
 
-## Roadmap
+## Backlog
 
-- Korean localization
+Roughly in order:
+
+- **Touch & tablet support** — bigger connection targets on coarse pointers, tap-tap to
+  connect, a collapsible sidebar below tablet width. Phones stay out of scope: this game
+  is a canvas problem, not a breakpoint problem.
+- **Offline / PWA** — the site is fully static, so a service worker makes it installable
+  and workable on conference wifi. The care point is cache invalidation vs. the CloudFront deploy.
+- **Accessibility pass** — keyboard-only building (connecting is drag-only today), ARIA
+  on canvas nodes, and honoring `prefers-reduced-motion`.
+- **More scenarios** — the mechanics already exist (decisions, attacks, cold starts,
+  multi-region, bus rules); new levels are data. A cost-anomaly incident and a
+  compliance-probe variant are first in line.
 
 ---
 
